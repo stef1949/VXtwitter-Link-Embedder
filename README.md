@@ -1,4 +1,10 @@
-# vxtwitter Link Bot
+<h1 align="center">
+vxtwitter Link Bot
+</h1>
+
+<p align="center">
+<img src="https://github.com/stef1949/Vxtwitter-Link-Embedder/blob/main/38CD6CE0-EFF2-48DE-9487-75D414D104E8.png?raw=true " width="200">
+<p/>
 
 This Discord bot looks for Twitter/X links in messages and automatically replaces them with `vxtwitter.com` links. It also provides a delete button so that the original user can remove the bot's transformed message.
 
