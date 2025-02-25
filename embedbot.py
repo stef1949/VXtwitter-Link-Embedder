@@ -129,8 +129,7 @@ async def on_message(message):
 
             await webhook.send(
                 content=response,
-                username=message.author.display_name,
-                avatar_url=message.author.display_avatar.url,
+                username=f"{message.author.display_name} > Twitter Link Embedder",
                 view=view
             )
             logger.info(f"Sent modified message via webhook for message {message.id}")
