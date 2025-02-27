@@ -34,16 +34,65 @@ user_rate_limit = {}  # Dictionary mapping user ID to last processed timestamp
 user_emulation_preferences = {}  # Maps user ID to boolean preference
 DEFAULT_EMULATION = True  # Default to emulating users
 
+# Bot statistics
+bot_start_time = time.time()
+links_processed = 0
+version = "1.0.0"  # Bot version
+
 # Slash command: /status
-@tree.command(name="status", description="Check the bot's status")
+@tree.command(name="status", description="View detailed bot status information")
 async def status(interaction: discord.Interaction):
     logger.info(f"Received /status command from {interaction.user} in guild {interaction.guild}")
+    
+    # Defer the response to avoid timeout
+    await interaction.response.defer(ephemeral=True)
+    
     try:
-        await interaction.response.send_message("Bot is running!", ephemeral=True)
-    except discord.errors.NotFound:
-        logger.warning(f"Interaction timed out for status command from {interaction.user}")
+        # Calculate uptime
+        uptime_seconds = int(time.time() - bot_start_time)
+        days, remainder = divmod(uptime_seconds, 86400)
+        hours, remainder = divmod(remainder, 3600)
+        minutes, seconds = divmod(remainder, 60)
+        uptime_str = f"{days}d {hours}h {minutes}m {seconds}s"
+        
+        # Get server count
+        server_count = len(client.guilds)
+        
+        # Format the status embed
+        embed = discord.Embed(
+            title="VXTwitter Bot Status",
+            description="Transforms Twitter/X links for better embeds",
+            color=0x1DA1F2,  # Twitter blue color
+            timestamp=discord.utils.utcnow()
+        )
+        
+        # Bot info section
+        embed.add_field(name="🤖 Bot Version", value=version, inline=True)
+        embed.add_field(name="⏱️ Uptime", value=uptime_str, inline=True)
+        embed.add_field(name="⚡ Status", value="Online", inline=True)
+        
+        # Statistics section
+        embed.add_field(name="🔄 Links Processed", value=links_processed, inline=True)
+        embed.add_field(name="🏠 Servers", value=server_count, inline=True)
+        embed.add_field(name="⏳ Rate Limit", value=f"{RATE_LIMIT_SECONDS} seconds", inline=True)
+        
+        # If in a guild, add guild-specific info
+        if interaction.guild:
+            guild_users_count = len(interaction.guild.members)
+            embed.add_field(
+                name="📊 Server Info", 
+                value=f"Name: {interaction.guild.name}\nMembers: {guild_users_count}", 
+                inline=False
+            )
+        
+        # Set footer with command help reminder
+        embed.set_footer(text="Use /help for available commands")
+        
+        # Send the embed
+        await interaction.followup.send(embed=embed, ephemeral=True)
     except Exception as e:
-        logger.error(f"Error responding to status command: {e}")
+        logger.error(f"Error generating status: {e}")
+        await interaction.followup.send("Error generating status information. Please try again later.", ephemeral=True)
 
 # Slash command: /help
 @tree.command(name="help", description="Show help information about the bot")
@@ -167,6 +216,10 @@ async def on_message(message):
             for url in urls
         ]
         response = "\n".join(modified_urls)
+        
+        # Update statistics
+        global links_processed
+        links_processed += len(urls)
 
         # Attempt to delete the original message.
         try:
