@@ -44,7 +44,7 @@ DEFAULT_EMULATION = True  # Default to emulating users
 # Bot statistics
 bot_start_time = time.time()
 links_processed = 0
-version = "2.1.1"  # Bot version
+version = "1.2.2"  # Bot version
 
 # Security settings
 GLOBAL_RATE_LIMIT = 30  # Maximum requests per minute across all users
@@ -76,7 +76,47 @@ def is_user_banned(user_id):
 
 def is_admin(user_id):
     """Check if a user is a bot admin"""
-    return user_id in ADMIN_IDS
+    # First check if the user is in the admin set
+    if user_id in ADMIN_IDS:
+        return True
+    
+    # Return a default value - will be updated on the next is_admin check
+    return False
+
+async def refresh_admin_status():
+    """Refresh the admin status from application info"""
+    try:
+        application = await client.application_info()
+        
+        # Check if the bot is owned by a team
+        if application.team:
+            # Add all team members as admins
+            for team_member in application.team.members:
+                ADMIN_IDS.add(team_member.id)
+                logger.info(f"Added team member {team_member.id} ({team_member.name}) as admin")
+        else:
+            # Add owner as admin for non-team bots
+            ADMIN_IDS.add(application.owner.id)
+    except Exception as e:
+        logger.error(f"Failed to refresh admin status: {e}")
+
+async def check_team_membership(user_id):
+    """Check if a user is a member of the bot's team"""
+    try:
+        application = await client.application_info()
+        
+        # Check if the bot is owned by a team
+        if application.team:
+            for team_member in application.team.members:
+                if team_member.id == user_id:
+                    logger.info(f"User {user_id} is a member of team {application.team.name}")
+                    return True
+        
+        # If not a team bot or user not in team
+        return False
+    except Exception as e:
+        logger.error(f"Failed to check team membership: {e}")
+        return False
 
 def is_server_blacklisted(server_id):
     """Check if a server is blacklisted"""
@@ -501,6 +541,7 @@ class MessageControlView(discord.ui.View):
     def __init__(self, timeout: float = 604800):  # 7 days
         super().__init__(timeout=timeout)
         self.message = None  # Will store reference to the message
+        self.original_author_id = None  # Will store the original author's ID
         
     async def on_timeout(self):
         """Handle the view timeout by modifying the message if possible"""
@@ -525,39 +566,45 @@ class MessageControlView(discord.ui.View):
         try:
             message = interaction.message
             
-            # Extract author ID from the message content if possible
+            # First check if we have the original author ID stored in the view
             author_id = None
+            if hasattr(self, 'original_author_id') and self.original_author_id:
+                author_id = self.original_author_id
+                logger.info(f"Using stored original author ID: {author_id}")
             
-            # Log message content for debugging
-            logger.info(f"Message content: {message.content}")
-            
-            # Try to find an @mention in the message content with a more flexible regex
-            if message.content:
-                # Try different regex patterns to extract user ID
-                mention_patterns = [
-                    r'<@!?(\d+)>',  # Standard mention format <@123456789> or <@!123456789>
-                    r'by <@!?(\d+)>',  # Matches "by @user"
-                    r'by <@!?(\d+)',  # Without closing bracket
-                    r'<@!?(\d+)',  # Just the opening of mention
-                    r'(\d{17,20})',  # Any 17-20 digit number (likely a user ID)
-                ]
+            # If not, try to extract from message content
+            if not author_id:
+                # Log message content for debugging
+                logger.info(f"Message content for delete: {message.content}")
                 
-                for pattern in mention_patterns:
-                    mention_match = re.search(pattern, message.content)
-                    if mention_match:
-                        author_id = int(mention_match.group(1))
-                        logger.info(f"Found author ID {author_id} using pattern {pattern}")
-                        break
+                # Try to find an @mention in the message content with more flexible patterns
+                if message.content:
+                    # Try different regex patterns to extract user ID
+                    mention_patterns = [
+                        r'<@!?(\d+)>',  # Standard mention format <@123456789> or <@!123456789>
+                        r'by <@!?(\d+)>',  # Matches "by @user"
+                        r'by <@!?(\d+)',  # Without closing bracket
+                        r'<@!?(\d+)',  # Just the opening of mention
+                        r'(\d{17,20})',  # Any 17-20 digit number (likely a user ID)
+                    ]
+                    
+                    for pattern in mention_patterns:
+                        mention_match = re.search(pattern, message.content)
+                        if mention_match:
+                            author_id = int(mention_match.group(1))
+                            logger.info(f"Found author ID {author_id} using pattern {pattern}")
+                            break
             
             # For messages sent via webhook (user emulation enabled)
             if not author_id and hasattr(message, 'webhook_id') and message.webhook_id:
-                logger.info(f"Message has webhook_id: {message.webhook_id}")
-                # For webhook messages, always allow the interaction user to delete
-                # This is a reasonable fallback since only the original poster would try to delete
-                author_id = interaction.user.id
-                logger.info(f"Using interaction user ID as author: {author_id}")
+                # In this case, we can't reliably determine the original author from the message alone
+                # Use a fallback check to see if the requesting user is the message author
+                logger.info(f"Webhook message detected for delete: {message.webhook_id}")
+                if interaction.user.id == message.author.id:
+                    author_id = interaction.user.id
+                    logger.info(f"Using interaction user ID as author for delete: {author_id}")
             
-            # Always allow deletion by server admins
+            # Always allow server admins to delete
             is_admin_in_server = False
             if interaction.guild and interaction.guild.get_member(interaction.user.id):
                 member = interaction.guild.get_member(interaction.user.id)
@@ -567,10 +614,18 @@ class MessageControlView(discord.ui.View):
             
             # Allow deletion by bot admins too
             is_bot_admin = is_admin(interaction.user.id)
+            if is_bot_admin:
+                logger.info(f"User {interaction.user.id} is a bot admin, allowing deletion")
             
+            # Always allow server owners to delete
+            is_server_owner = False
+            if interaction.guild and interaction.guild.owner_id == interaction.user.id:
+                is_server_owner = True
+                logger.info(f"User {interaction.user.id} is server owner, allowing deletion")
+        
             # Only allow the original poster or admins to delete the message
-            logger.info(f"Author ID: {author_id}, User ID: {interaction.user.id}, Admin: {is_admin_in_server or is_bot_admin}")
-            if (author_id and interaction.user.id == author_id) or is_admin_in_server or is_bot_admin:
+            logger.info(f"Delete check - Author: {author_id}, User: {interaction.user.id}, Admin: {is_admin_in_server}, Owner: {is_server_owner}")
+            if (author_id and interaction.user.id == author_id) or is_admin_in_server or is_bot_admin or is_server_owner:
                 await message.delete()
                 logger.info(f"Message {message.id} deleted by {interaction.user}")
                 await interaction.response.send_message("Message deleted.", ephemeral=True)
@@ -592,12 +647,12 @@ class MessageControlView(discord.ui.View):
         
         # Extract author ID from the message content if possible
         author_id = None
+        message = interaction.message
         
         # Log message content for debugging
-        logger.info(f"Message content: {interaction.message.content}")
+        logger.info(f"Message content for toggle: {message.content}")
         
         # Try to find an @mention in the message content with more flexible patterns
-        message = interaction.message
         if message.content:
             # Try different regex patterns to extract user ID
             mention_patterns = [
@@ -617,25 +672,49 @@ class MessageControlView(discord.ui.View):
         
         # For messages sent via webhook (user emulation enabled)
         if not author_id and hasattr(message, 'webhook_id') and message.webhook_id:
-            # For webhook messages, always allow the interaction user to change settings
+            logger.info(f"Webhook message detected for toggle: {message.webhook_id}")
+            # For webhook messages, always allow the interaction user to modify settings
+            # This is a reasonable assumption since mostly only the original poster would try to toggle
             author_id = interaction.user.id
-            logger.info(f"Using interaction user ID as author for emulation toggle: {author_id}")
+            logger.info(f"Using interaction user ID as author for toggle: {author_id}")
         
-        # Only allow the original poster to change their preference
-        if author_id and interaction.user.id == author_id:
+        # Always allow server owners to toggle
+        is_server_owner = False
+        if interaction.guild and interaction.guild.owner_id == interaction.user.id:
+            is_server_owner = True
+            logger.info(f"User {interaction.user.id} is server owner, allowing toggle")
+        
+        # Check if user is a bot admin
+        is_bot_admin = is_admin(interaction.user.id)
+        if is_bot_admin:
+            logger.info(f"User {interaction.user.id} is bot admin, allowing toggle")
+        
+        # Only allow the original poster, server owner, or bot admin to change preference
+        logger.info(f"Toggle check - Author: {author_id}, User: {interaction.user.id}, Admin: {is_bot_admin}, Owner: {is_server_owner}")
+        if (author_id and interaction.user.id == author_id) or is_server_owner or is_bot_admin:
             # Toggle the user's emulation preference
-            current_preference = user_emulation_preferences.get(interaction.user.id, DEFAULT_EMULATION)
+            user_id_to_toggle = author_id if author_id else interaction.user.id
+            current_preference = user_emulation_preferences.get(user_id_to_toggle, DEFAULT_EMULATION)
             new_preference = not current_preference
-            user_emulation_preferences[interaction.user.id] = new_preference
+            user_emulation_preferences[user_id_to_toggle] = new_preference
             
             # Notify the user of the change
             if new_preference:
-                message_text = "Future posts will use your name and avatar."
+                msg = "Future posts will use your name and avatar."
             else:
-                message_text = "Future posts will show as coming from the bot with a mention to you."
+                msg = "Future posts will show as coming from the bot with a mention to you."
             
-            await interaction.response.send_message(message_text, ephemeral=True)
-            logger.info(f"User {interaction.user} set emulation preference to {new_preference}")
+            if author_id and interaction.user.id != author_id:
+                # If admin is changing someone else's preference
+                try:
+                    user = await client.fetch_user(author_id)
+                    username = user.name
+                except:
+                    username = f"User {author_id}"
+                msg = f"Changed {username}'s emulation preference. {msg}"
+            
+            await interaction.response.send_message(msg, ephemeral=True)
+            logger.info(f"User {user_id_to_toggle} emulation preference set to {new_preference} by {interaction.user.id}")
         else:
             logger.warning(f"Unauthorized emulation toggle attempt by {interaction.user}")
             await interaction.response.send_message("You can only change your own emulation preference.", ephemeral=True)
@@ -814,6 +893,10 @@ async def on_message(message):
 
         # Check the user's emulation preference
         should_emulate = user_emulation_preferences.get(message.author.id, DEFAULT_EMULATION)
+        
+        # Store the original author's ID in the view for later reference
+        # This helps with permission checking for buttons
+        view.original_author_id = message.author.id
         
         if should_emulate:
             # Check if the bot has the required permissions to create webhooks
