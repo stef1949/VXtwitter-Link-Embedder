@@ -30,31 +30,89 @@ URL_REGEX = re.compile(r'(https?://(?:www\.)?(?:twitter\.com|x\.com)/\S+)', re.I
 RATE_LIMIT_SECONDS = 10
 user_rate_limit = {}  # Dictionary mapping user ID to last processed timestamp
 
+# User preferences for emulation (True = emulate user, False = post as bot)
+user_emulation_preferences = {}  # Maps user ID to boolean preference
+DEFAULT_EMULATION = True  # Default to emulating users
+
 # Slash command: /status
 @tree.command(name="status", description="Check the bot's status")
 async def status(interaction: discord.Interaction):
     logger.info(f"Received /status command from {interaction.user} in guild {interaction.guild}")
-    await interaction.response.send_message("Bot is running!", ephemeral=True)
+    try:
+        await interaction.response.send_message("Bot is running!", ephemeral=True)
+    except discord.errors.NotFound:
+        logger.warning(f"Interaction timed out for status command from {interaction.user}")
+    except Exception as e:
+        logger.error(f"Error responding to status command: {e}")
 
 # Slash command: /help
 @tree.command(name="help", description="Show help information about the bot")
 async def help_command(interaction: discord.Interaction):
     logger.info(f"Received /help command from {interaction.user} in guild {interaction.guild}")
+    # Defer the response to avoid timeout
+    await interaction.response.defer(ephemeral=True)
+    
     help_text = (
         "This bot replaces `twitter.com` or `x.com` links with `vxtwitter.com` and provides a delete button "
         "for the original poster to delete the message.\n\n"
         "**Commands:**\n"
         "`/status` - Check if the bot is running.\n"
-        "`/help` - Show this help message.\n\n"
+        "`/help` - Show this help message.\n"
+        "`/emulate` - Choose whether the bot posts links as you or as itself.\n\n"
         "Just send a message containing a Twitter/X link, and the bot will take care of the rest."
     )
-    await interaction.response.send_message(help_text, ephemeral=True)
+    
+    try:
+        await interaction.followup.send(help_text, ephemeral=True)
+    except Exception as e:
+        logger.error(f"Error responding to help command: {e}")
+
+# Slash command: /emulate
+@tree.command(name="emulate", description="Choose whether the bot should emulate your identity when posting links")
+async def emulate(interaction: discord.Interaction, enable: bool):
+    """Set whether the bot should post as you or as itself.
+    
+    Parameters:
+    -----------
+    enable: bool
+        True to have the bot post links with your name and avatar, False to have it post as itself.
+    """
+    logger.info(f"Received /emulate command from {interaction.user} with value {enable}")
+    
+    # Defer the response to avoid timeout
+    await interaction.response.defer(ephemeral=True)
+    
+    user_emulation_preferences[interaction.user.id] = enable
+    
+    if enable:
+        message = "The bot will now post Twitter/X links with your name and avatar."
+    else:
+        message = "The bot will now post Twitter/X links as itself and mention you."
+    
+    try:
+        await interaction.followup.send(message, ephemeral=True)
+    except Exception as e:
+        logger.error(f"Error responding to emulate command: {e}")
 
 # Create a view with a button that allows only the original poster to delete the message.
 class DeleteButtonView(discord.ui.View):
-    def __init__(self, original_author_id: int, timeout: float = 180):
+    def __init__(self, original_author_id: int, timeout: float = 604800):  # 7 days instead of 24 hours
         super().__init__(timeout=timeout)
         self.original_author_id = original_author_id
+        
+    async def on_timeout(self):
+        """Handle the view timeout by modifying the message if possible"""
+        try:
+            # Try to disable the button when it times out
+            for item in self.children:
+                item.disabled = True
+                
+            # Update the message with disabled buttons if it still exists
+            if hasattr(self, "message") and self.message:
+                await self.message.edit(view=self)
+        except Exception as e:
+            logger.error(f"Error handling view timeout: {e}")
+            # Fail silently if the message was deleted or there's another issue
 
     @discord.ui.button(label="Delete", style=discord.ButtonStyle.danger)
     async def delete_button(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -122,26 +180,41 @@ async def on_message(message):
         # Create a view with the delete button.
         view = DeleteButtonView(message.author.id)
 
-        # Try sending the modified message via a webhook to mimic the user's profile.
-        try:
-            webhook = await message.channel.create_webhook(name="TempWebhook")
-            logger.info(f"Created temporary webhook in channel {message.channel} for message {message.id}")
-
-            await webhook.send(
-                content=response,
-                username=f"{message.author.display_name} > Twitter Link Embedder",
-                view=view
-            )
-            logger.info(f"Sent modified message via webhook for message {message.id}")
-            await webhook.delete()
-            logger.info(f"Deleted temporary webhook for message {message.id}")
-        except Exception as e:
-            logger.error(f"Webhook error for message {message.id}: {e}")
-            # Fallback: send as the bot if webhook fails.
+        # Check the user's emulation preference
+        should_emulate = user_emulation_preferences.get(message.author.id, DEFAULT_EMULATION)
+        
+        if should_emulate:
+            # Try sending the modified message via a webhook to mimic the user's profile.
             try:
-                await message.channel.send(response, view=view)
-                logger.info(f"Sent modified message via bot fallback for message {message.id}")
-            except Exception as e2:
-                logger.error(f"Failed to send fallback message for message {message.id}: {e2}")
+                webhook = await message.channel.create_webhook(name="TempWebhook")
+                logger.info(f"Created temporary webhook in channel {message.channel} for message {message.id}")
+
+                sent_message = await webhook.send(
+                    content=response,
+                    username=message.author.display_name,
+                    avatar_url=message.author.display_avatar.url,
+                    view=view
+                )
+                view.message = sent_message
+                logger.info(f"Sent modified message via webhook for message {message.id}")
+                await webhook.delete()
+                logger.info(f"Deleted temporary webhook for message {message.id}")
+            except Exception as e:
+                logger.error(f"Webhook error for message {message.id}: {e}")
+                # Fallback: send as the bot if webhook fails.
+                try:
+                    sent_message = await message.channel.send(f"**Link shared by {message.author.display_name}:** {response}", view=view)
+                    view.message = sent_message
+                    logger.info(f"Sent modified message via bot fallback for message {message.id}")
+                except Exception as e2:
+                    logger.error(f"Failed to send fallback message for message {message.id}: {e2}")
+        else:
+            # Send as the bot directly, with attribution to the original user
+            try:
+                sent_message = await message.channel.send(f"**Link shared by {message.author.display_name}:** {response}", view=view)
+                view.message = sent_message
+                logger.info(f"Sent modified message as bot (per user preference) for message {message.id}")
+            except Exception as e:
+                logger.error(f"Failed to send message as bot for message {message.id}: {e}")
 
 client.run(TOKEN)
