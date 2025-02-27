@@ -44,7 +44,7 @@ DEFAULT_EMULATION = True  # Default to emulating users
 # Bot statistics
 bot_start_time = time.time()
 links_processed = 0
-version = "1.2.0"  # Bot version
+version = "2.1.1"  # Bot version
 
 # Security settings
 GLOBAL_RATE_LIMIT = 30  # Maximum requests per minute across all users
@@ -123,6 +123,12 @@ async def status(interaction: discord.Interaction):
         # Get server count
         server_count = len(client.guilds)
         
+        # Check webhook permissions in the current channel
+        webhook_perm = "N/A"
+        if interaction.channel and isinstance(interaction.channel, discord.TextChannel):
+            bot_permissions = interaction.channel.permissions_for(interaction.guild.me)
+            webhook_perm = "✅ Yes" if bot_permissions.manage_webhooks else "❌ No"
+        
         # Format the status embed
         embed = discord.Embed(
             title="VXTwitter Bot Status",
@@ -141,12 +147,38 @@ async def status(interaction: discord.Interaction):
         embed.add_field(name="🏠 Servers", value=server_count, inline=True)
         embed.add_field(name="⏳ Rate Limit", value=f"{RATE_LIMIT_SECONDS} seconds", inline=True)
         
+        # Team and permissions section
+        is_team_bot = False
+        team_name = "N/A"
+        try:
+            application = await client.application_info()
+            is_team_bot = application.team is not None
+            if is_team_bot and application.team:
+                team_name = application.team.name
+        except Exception as e:
+            logger.error(f"Failed to get application info: {e}")
+        
+        embed.add_field(name="👥 Team Bot", value=f"{'Yes' if is_team_bot else 'No'}", inline=True)
+        if is_team_bot:
+            embed.add_field(name="🏢 Team Name", value=team_name, inline=True)
+        embed.add_field(name="🔐 Can Create Webhooks", value=webhook_perm, inline=True)
+        
+        # Show admin status
+        is_admin = interaction.user.id in ADMIN_IDS
+        embed.add_field(name="👑 Admin Status", value="✅ Admin" if is_admin else "❌ Not Admin", inline=True)
+        
         # If in a guild, add guild-specific info
         if interaction.guild:
             guild_users_count = len(interaction.guild.members)
+            # Check if the user is a server admin
+            is_server_admin = False
+            if interaction.guild.get_member(interaction.user.id):
+                member = interaction.guild.get_member(interaction.user.id)
+                is_server_admin = member.guild_permissions.administrator
+            
             embed.add_field(
                 name="📊 Server Info", 
-                value=f"Name: {interaction.guild.name}\nMembers: {guild_users_count}", 
+                value=f"Name: {interaction.guild.name}\nMembers: {guild_users_count}\nYou are{' ' if is_server_admin else ' not '}a server admin", 
                 inline=False
             )
         
@@ -166,6 +198,17 @@ async def help_command(interaction: discord.Interaction):
     # Defer the response to avoid timeout
     await interaction.response.defer(ephemeral=True)
     
+    # Check webhook permissions in this channel
+    webhook_permissions = False
+    if interaction.channel and isinstance(interaction.channel, discord.TextChannel):
+        bot_permissions = interaction.channel.permissions_for(interaction.guild.me)
+        webhook_permissions = bot_permissions.manage_webhooks
+    
+    # Adjust help text based on permissions
+    emulation_note = ""
+    if not webhook_permissions:
+        emulation_note = "\n⚠️ **Note:** User emulation requires webhook permissions, which the bot doesn't have in this channel."
+    
     help_text = (
         "This bot replaces `twitter.com` or `x.com` links with `vxtwitter.com` for better embeds.\n\n"
         "**Commands:**\n"
@@ -176,7 +219,7 @@ async def help_command(interaction: discord.Interaction):
         "When you share a Twitter/X link, it will be automatically converted, and you'll see:\n"
         "- A `Delete` button - Remove your posted link\n"
         "- A `Toggle Emulation` button - Quickly switch between posting styles\n\n"
-        "Just share a Twitter/X link in any channel, and the bot will handle the rest!"
+        f"Just share a Twitter/X link in any channel, and the bot will handle the rest!{emulation_note}"
     )
     
     try:
@@ -199,10 +242,20 @@ async def emulate(interaction: discord.Interaction, enable: bool):
     # Defer the response to avoid timeout
     await interaction.response.defer(ephemeral=True)
     
+    # Check if the bot has webhook permissions in this channel (if enable is True)
+    can_use_webhooks = False
+    if enable and interaction.channel and isinstance(interaction.channel, discord.TextChannel):
+        bot_permissions = interaction.channel.permissions_for(interaction.guild.me)
+        can_use_webhooks = bot_permissions.manage_webhooks
+    
     user_emulation_preferences[interaction.user.id] = enable
     
     if enable:
-        message = "The bot will now post Twitter/X links with your name and avatar."
+        if can_use_webhooks:
+            message = "The bot will now post Twitter/X links with your name and avatar."
+        else:
+            message = ("The bot will try to post Twitter/X links with your name and avatar. However, it may not work in "
+                       "some channels due to missing webhook permissions. In those cases, it will mention you instead.")
     else:
         message = "The bot will now post Twitter/X links as itself and mention you."
     
@@ -212,6 +265,41 @@ async def emulate(interaction: discord.Interaction, enable: bool):
         logger.error(f"Error responding to emulate command: {e}")
 
 # Admin only commands
+@tree.command(name="listadmins", description="List all bot administrators")
+@discord.app_commands.checks.cooldown(1, 5.0)  # 1 use per 5 seconds per user
+async def list_admins(interaction: discord.Interaction):
+    """List all bot administrators"""
+    logger.info(f"Received /listadmins command from {interaction.user}")
+    
+    # Check if the user is an admin or server owner
+    is_bot_admin = is_admin(interaction.user.id)
+    is_server_owner = interaction.guild and interaction.guild.owner_id == interaction.user.id
+    
+    if not (is_bot_admin or is_server_owner):
+        log_security_event("UNAUTHORIZED_ADMIN_COMMAND", interaction.user.id, 
+                          interaction.guild_id if interaction.guild else None,
+                          "Attempted to list admins")
+        await interaction.response.send_message("You don't have permission to use this command.", ephemeral=True)
+        return
+    
+    # Get admin details
+    try:
+        admin_details = []
+        for admin_id in ADMIN_IDS:
+            try:
+                user = await client.fetch_user(admin_id)
+                admin_details.append(f"• {user.name} (ID: {admin_id})")
+            except:
+                admin_details.append(f"• Unknown User (ID: {admin_id})")
+        
+        if admin_details:
+            admin_list = "\n".join(admin_details)
+            await interaction.response.send_message(f"**Bot Administrators:**\n{admin_list}", ephemeral=True)
+        else:
+            await interaction.response.send_message("No administrators configured.", ephemeral=True)
+    except Exception as e:
+        logger.error(f"Error listing admins: {e}")
+        await interaction.response.send_message("An error occurred while listing administrators.", ephemeral=True)
 @tree.command(name="ban", description="[ADMIN] Ban a user from using the bot")
 @discord.app_commands.checks.cooldown(1, 5.0)  # 1 use per 5 seconds per user
 async def ban_user(interaction: discord.Interaction, user: discord.User, reason: str = "No reason provided"):
@@ -440,21 +528,49 @@ class MessageControlView(discord.ui.View):
             # Extract author ID from the message content if possible
             author_id = None
             
-            # Try to find an @mention in the message content
+            # Log message content for debugging
+            logger.info(f"Message content: {message.content}")
+            
+            # Try to find an @mention in the message content with a more flexible regex
             if message.content:
-                mention_match = re.search(r'<@(\d+)>', message.content)
-                if mention_match:
-                    author_id = int(mention_match.group(1))
+                # Try different regex patterns to extract user ID
+                mention_patterns = [
+                    r'<@!?(\d+)>',  # Standard mention format <@123456789> or <@!123456789>
+                    r'by <@!?(\d+)>',  # Matches "by @user"
+                    r'by <@!?(\d+)',  # Without closing bracket
+                    r'<@!?(\d+)',  # Just the opening of mention
+                    r'(\d{17,20})',  # Any 17-20 digit number (likely a user ID)
+                ]
+                
+                for pattern in mention_patterns:
+                    mention_match = re.search(pattern, message.content)
+                    if mention_match:
+                        author_id = int(mention_match.group(1))
+                        logger.info(f"Found author ID {author_id} using pattern {pattern}")
+                        break
             
             # For messages sent via webhook (user emulation enabled)
             if not author_id and hasattr(message, 'webhook_id') and message.webhook_id:
-                # In this case, we can't reliably determine the original author from the message alone
-                # Use a fallback check to see if the requesting user is the message author
-                if interaction.user.id == message.author.id:
-                    author_id = interaction.user.id
-        
-            # Only allow the original poster to delete the message
-            if author_id and interaction.user.id == author_id:
+                logger.info(f"Message has webhook_id: {message.webhook_id}")
+                # For webhook messages, always allow the interaction user to delete
+                # This is a reasonable fallback since only the original poster would try to delete
+                author_id = interaction.user.id
+                logger.info(f"Using interaction user ID as author: {author_id}")
+            
+            # Always allow deletion by server admins
+            is_admin_in_server = False
+            if interaction.guild and interaction.guild.get_member(interaction.user.id):
+                member = interaction.guild.get_member(interaction.user.id)
+                is_admin_in_server = member.guild_permissions.administrator
+                if is_admin_in_server:
+                    logger.info(f"User {interaction.user.id} is a server admin, allowing deletion")
+            
+            # Allow deletion by bot admins too
+            is_bot_admin = is_admin(interaction.user.id)
+            
+            # Only allow the original poster or admins to delete the message
+            logger.info(f"Author ID: {author_id}, User ID: {interaction.user.id}, Admin: {is_admin_in_server or is_bot_admin}")
+            if (author_id and interaction.user.id == author_id) or is_admin_in_server or is_bot_admin:
                 await message.delete()
                 logger.info(f"Message {message.id} deleted by {interaction.user}")
                 await interaction.response.send_message("Message deleted.", ephemeral=True)
@@ -477,18 +593,33 @@ class MessageControlView(discord.ui.View):
         # Extract author ID from the message content if possible
         author_id = None
         
-        # Try to find an @mention in the message content
+        # Log message content for debugging
+        logger.info(f"Message content: {interaction.message.content}")
+        
+        # Try to find an @mention in the message content with more flexible patterns
         message = interaction.message
         if message.content:
-            mention_match = re.search(r'<@(\d+)>', message.content)
-            if mention_match:
-                author_id = int(mention_match.group(1))
+            # Try different regex patterns to extract user ID
+            mention_patterns = [
+                r'<@!?(\d+)>',  # Standard mention format <@123456789> or <@!123456789>
+                r'by <@!?(\d+)>',  # Matches "by @user"
+                r'by <@!?(\d+)',  # Without closing bracket
+                r'<@!?(\d+)',  # Just the opening of mention
+                r'(\d{17,20})',  # Any 17-20 digit number (likely a user ID)
+            ]
+            
+            for pattern in mention_patterns:
+                mention_match = re.search(pattern, message.content)
+                if mention_match:
+                    author_id = int(mention_match.group(1))
+                    logger.info(f"Found author ID {author_id} using pattern {pattern}")
+                    break
         
         # For messages sent via webhook (user emulation enabled)
         if not author_id and hasattr(message, 'webhook_id') and message.webhook_id:
-            # In this case, use the interaction user as the author
-            if interaction.user.id == message.author.id:
-                author_id = interaction.user.id
+            # For webhook messages, always allow the interaction user to change settings
+            author_id = interaction.user.id
+            logger.info(f"Using interaction user ID as author for emulation toggle: {author_id}")
         
         # Only allow the original poster to change their preference
         if author_id and interaction.user.id == author_id:
@@ -499,11 +630,11 @@ class MessageControlView(discord.ui.View):
             
             # Notify the user of the change
             if new_preference:
-                message = "Future posts will use your name and avatar."
+                message_text = "Future posts will use your name and avatar."
             else:
-                message = "Future posts will show as coming from the bot with a link to your profile."
+                message_text = "Future posts will show as coming from the bot with a mention to you."
             
-            await interaction.response.send_message(message, ephemeral=True)
+            await interaction.response.send_message(message_text, ephemeral=True)
             logger.info(f"User {interaction.user} set emulation preference to {new_preference}")
         else:
             logger.warning(f"Unauthorized emulation toggle attempt by {interaction.user}")
@@ -572,10 +703,23 @@ async def security_maintenance():
 async def on_ready():
     logger.info(f"Logged in as {client.user}!")
     
-    # Initialize the first admin (bot owner)
-    application = await client.application_info()
-    ADMIN_IDS.add(application.owner.id)
-    logger.info(f"Bot owner {application.owner.id} ({application.owner.name}) added as admin")
+    # Initialize admins (bot owner or team members)
+    try:
+        application = await client.application_info()
+        
+        # Check if the bot is owned by a team
+        if application.team:
+            logger.info(f"Bot is owned by team: {application.team.name}")
+            # Add all team members as admins
+            for team_member in application.team.members:
+                ADMIN_IDS.add(team_member.id)
+                logger.info(f"Team member {team_member.id} ({team_member.name}) added as admin")
+        else:
+            # Add owner as admin for non-team bots
+            ADMIN_IDS.add(application.owner.id)
+            logger.info(f"Bot owner {application.owner.id} ({application.owner.name}) added as admin")
+    except Exception as e:
+        logger.error(f"Failed to initialize admins: {e}")
     
     # Sync the slash commands with Discord.
     try:
@@ -672,32 +816,61 @@ async def on_message(message):
         should_emulate = user_emulation_preferences.get(message.author.id, DEFAULT_EMULATION)
         
         if should_emulate:
-            # Try sending the modified message via a webhook to mimic the user's profile.
-            try:
-                webhook = await message.channel.create_webhook(name="TempWebhook")
-                logger.info(f"Created temporary webhook in channel {message.channel} for message {message.id}")
+            # Check if the bot has the required permissions to create webhooks
+            webhook_permissions = False
+            if isinstance(message.channel, discord.TextChannel):
+                bot_permissions = message.channel.permissions_for(message.guild.me)
+                webhook_permissions = bot_permissions.manage_webhooks
+            
+            if webhook_permissions:
+                # Try sending the modified message via a webhook to mimic the user's profile.
+                try:
+                    webhook = await message.channel.create_webhook(name="TempWebhook")
+                    logger.info(f"Created temporary webhook in channel {message.channel} for message {message.id}")
 
-                sent_message = await webhook.send(
-                    content=response,
-                    username=message.author.display_name,
-                    avatar_url=message.author.display_avatar.url,
-                    view=view
-                )
-                view.message = sent_message
-                logger.info(f"Sent modified message via webhook for message {message.id}")
-                await webhook.delete()
-                logger.info(f"Deleted temporary webhook for message {message.id}")
-            except Exception as e:
-                logger.error(f"Webhook error for message {message.id}: {e}")
-                # Fallback: send as the bot if webhook fails.
+                    sent_message = await webhook.send(
+                        content=response,
+                        username=message.author.display_name,
+                        avatar_url=message.author.display_avatar.url,
+                        view=view
+                    )
+                    view.message = sent_message
+                    logger.info(f"Sent modified message via webhook for message {message.id}")
+                    await webhook.delete()
+                    logger.info(f"Deleted temporary webhook for message {message.id}")
+                except discord.Forbidden as e:
+                    logger.error(f"Webhook permission error for message {message.id}: {e}")
+                    # Fall back to non-emulation mode with an explanation
+                    try:
+                        # Use user ID for the attribution
+                        user_id_mention = f"<@{message.author.id}>"
+                        sent_message = await message.channel.send(f"**Link shared by {user_id_mention}:**\n{response}", view=view)
+                        view.message = sent_message
+                        logger.info(f"Sent modified message via bot fallback for message {message.id}")
+                    except Exception as e2:
+                        logger.error(f"Failed to send fallback message for message {message.id}: {e2}")
+                except Exception as e:
+                    logger.error(f"Webhook error for message {message.id}: {e}")
+                    # Fallback: send as the bot if webhook fails.
+                    try:
+                        # Use user ID for the attribution
+                        user_id_mention = f"<@{message.author.id}>"
+                        sent_message = await message.channel.send(f"**Link shared by {user_id_mention}:**\n{response}", view=view)
+                        view.message = sent_message
+                        logger.info(f"Sent modified message via bot fallback for message {message.id}")
+                    except Exception as e2:
+                        logger.error(f"Failed to send fallback message for message {message.id}: {e2}")
+            else:
+                # No webhook permissions, inform the user via log
+                logger.warning(f"No webhook permissions in channel {message.channel.id}, using fallback method")
                 try:
                     # Use user ID for the attribution
                     user_id_mention = f"<@{message.author.id}>"
                     sent_message = await message.channel.send(f"**Link shared by {user_id_mention}:**\n{response}", view=view)
                     view.message = sent_message
-                    logger.info(f"Sent modified message via bot fallback for message {message.id}")
-                except Exception as e2:
-                    logger.error(f"Failed to send fallback message for message {message.id}: {e2}")
+                    logger.info(f"Sent modified message as bot due to missing webhook permissions for message {message.id}")
+                except Exception as e:
+                    logger.error(f"Failed to send message as bot for message {message.id}: {e}")
         else:
             # Send as the bot directly, with attribution to the original user
             try:
