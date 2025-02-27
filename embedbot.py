@@ -37,7 +37,7 @@ DEFAULT_EMULATION = True  # Default to emulating users
 # Bot statistics
 bot_start_time = time.time()
 links_processed = 0
-version = "1.0.0"  # Bot version
+version = "1.1.0"  # Bot version
 
 # Slash command: /status
 @tree.command(name="status", description="View detailed bot status information")
