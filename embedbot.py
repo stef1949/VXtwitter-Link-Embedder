@@ -37,7 +37,7 @@ DEFAULT_EMULATION = True  # Default to emulating users
 # Bot statistics
 bot_start_time = time.time()
 links_processed = 0
-version = "1.1.0"  # Bot version
+version = "1.1.1"  # Bot version
 
 # Slash command: /status
 @tree.command(name="status", description="View detailed bot status information")
@@ -102,13 +102,16 @@ async def help_command(interaction: discord.Interaction):
     await interaction.response.defer(ephemeral=True)
     
     help_text = (
-        "This bot replaces `twitter.com` or `x.com` links with `vxtwitter.com` and provides a delete button "
-        "for the original poster to delete the message.\n\n"
+        "This bot replaces `twitter.com` or `x.com` links with `vxtwitter.com` for better embeds.\n\n"
         "**Commands:**\n"
-        "`/status` - Check if the bot is running.\n"
+        "`/status` - Check bot status and statistics.\n"
         "`/help` - Show this help message.\n"
         "`/emulate` - Choose whether the bot posts links as you or as itself.\n\n"
-        "Just send a message containing a Twitter/X link, and the bot will take care of the rest."
+        "**Post Controls:**\n"
+        "When you share a Twitter/X link, it will be automatically converted, and you'll see:\n"
+        "- A `Delete` button - Remove your posted link\n"
+        "- A `Toggle Emulation` button - Quickly switch between posting styles\n\n"
+        "Just share a Twitter/X link in any channel, and the bot will handle the rest!"
     )
     
     try:
@@ -143,16 +146,17 @@ async def emulate(interaction: discord.Interaction, enable: bool):
     except Exception as e:
         logger.error(f"Error responding to emulate command: {e}")
 
-# Create a view with a button that allows only the original poster to delete the message.
-class DeleteButtonView(discord.ui.View):
-    def __init__(self, original_author_id: int, timeout: float = 604800):  # 7 days instead of 24 hours
+# Create a view with buttons for message management
+class MessageControlView(discord.ui.View):
+    def __init__(self, original_author_id: int, timeout: float = 604800):  # 7 days
         super().__init__(timeout=timeout)
         self.original_author_id = original_author_id
+        self.message = None  # Will store reference to the message
         
     async def on_timeout(self):
         """Handle the view timeout by modifying the message if possible"""
         try:
-            # Try to disable the button when it times out
+            # Try to disable the buttons when they time out
             for item in self.children:
                 item.disabled = True
                 
@@ -166,7 +170,7 @@ class DeleteButtonView(discord.ui.View):
     @discord.ui.button(label="Delete", style=discord.ButtonStyle.danger)
     async def delete_button(self, interaction: discord.Interaction, button: discord.ui.Button):
         logger.info(f"Delete button clicked by {interaction.user} in message {interaction.message.id}")
-        # Only allow the original poster to delete the message.
+        # Only allow the original poster to delete the message
         if interaction.user.id != self.original_author_id:
             logger.warning(f"Unauthorized delete attempt by {interaction.user}")
             await interaction.response.send_message("You are not allowed to delete this message.", ephemeral=True)
@@ -176,10 +180,33 @@ class DeleteButtonView(discord.ui.View):
             await interaction.message.delete()
             logger.info(f"Message {interaction.message.id} deleted by {interaction.user}")
             await interaction.response.send_message("Message deleted.", ephemeral=True)
-            self.stop()  # Stop listening for further interactions.
+            self.stop()  # Stop listening for further interactions
         except discord.NotFound:
             logger.error(f"Message {interaction.message.id} not found when trying to delete")
             await interaction.response.send_message("Message already deleted.", ephemeral=True)
+    
+    @discord.ui.button(label="Toggle User Emulation", style=discord.ButtonStyle.secondary)
+    async def toggle_emulation_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        logger.info(f"Toggle User emulation button clicked by {interaction.user}")
+        # Only allow the original poster to change their preference
+        if interaction.user.id != self.original_author_id:
+            logger.warning(f"Unauthorized emulation toggle attempt by {interaction.user}")
+            await interaction.response.send_message("You can only change your own emulation preference.", ephemeral=True)
+            return
+        
+        # Toggle the user's emulation preference
+        current_preference = user_emulation_preferences.get(interaction.user.id, DEFAULT_EMULATION)
+        new_preference = not current_preference
+        user_emulation_preferences[interaction.user.id] = new_preference
+        
+        # Notify the user of the change
+        if new_preference:
+            message = "Future posts will use your name and avatar."
+        else:
+            message = "Future posts will show as coming from the bot with a link to your profile."
+        
+        await interaction.response.send_message(message, ephemeral=True)
+        logger.info(f"User {interaction.user} set emulation preference to {new_preference}")
 
 @client.event
 async def on_ready():
@@ -230,8 +257,8 @@ async def on_message(message):
         except discord.HTTPException as e:
             logger.error(f"Failed to delete message {message.id}: {e}")
 
-        # Create a view with the delete button.
-        view = DeleteButtonView(message.author.id)
+        # Create a view with buttons for message control
+        view = MessageControlView(message.author.id)
 
         # Check the user's emulation preference
         should_emulate = user_emulation_preferences.get(message.author.id, DEFAULT_EMULATION)
@@ -256,7 +283,9 @@ async def on_message(message):
                 logger.error(f"Webhook error for message {message.id}: {e}")
                 # Fallback: send as the bot if webhook fails.
                 try:
-                    sent_message = await message.channel.send(f"**Link shared by {message.author.display_name}:** {response}", view=view)
+                    # Create a clickable link to the user's profile
+                    user_link = f"[{message.author.display_name}](https://discord.com/users/{message.author.id})"
+                    sent_message = await message.channel.send(f"**Link shared by {user_link}:** {response}", view=view)
                     view.message = sent_message
                     logger.info(f"Sent modified message via bot fallback for message {message.id}")
                 except Exception as e2:
