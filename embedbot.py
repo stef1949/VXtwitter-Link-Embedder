@@ -819,7 +819,9 @@ async def on_ready():
 
 @client.event
 async def on_message(message):
+    global links_processed  # Declare global at the start of the function
     # Avoid processing the bot's own messages.
+    
     if message.author == client.user:
         return
         
@@ -852,61 +854,106 @@ async def on_message(message):
         logger.warning("Global rate limit exceeded, ignoring message")
         return
 
-    # Process only messages that contain twitter.com or x.com links.
-    urls = URL_REGEX.findall(message.content)
-    if urls:
-        # Apply per-user rate limiting.
-        now = time.time()
-        last_time = user_rate_limit.get(message.author.id, 0)
-        if now - last_time < RATE_LIMIT_SECONDS:
-            logger.info(f"User {message.author} is rate limited. Time since last processing: {now - last_time:.2f} seconds.")
-            return
-        user_rate_limit[message.author.id] = now
-
-        logger.info(f"Processing message from {message.author} (ID: {message.id}) with URLs: {urls}")
-
-        # Sanitize the URLs to prevent any potential injection
-        urls = [sanitize_url(url) for url in urls]
-
-        # Replace twitter.com or x.com with vxtwitter.com.
-        modified_urls = [
-            re.sub(r'(twitter\.com|x\.com)', 'vxtwitter.com', url, flags=re.IGNORECASE)
-            for url in urls
-        ]
-        response = "\n".join(modified_urls)
+    # Process only messages that contain twitter.com or x.com links using re.finditer
+    matches = list(URL_REGEX.finditer(message.content))
+    if matches:
+        spoiler_urls = []
+        non_spoiler_urls = []
+        for match in matches:
+            url = match.group(0)
+            start_index = match.start()
+            end_index = match.end()
+            # Check if the URL is wrapped in spoiler tags '||'
+            if start_index >= 2 and end_index + 2 <= len(message.content) and \
+               message.content[start_index-2:start_index] == "||" and \
+               message.content[end_index:end_index+2] == "||":
+                spoiler_urls.append(url)
+            else:
+                non_spoiler_urls.append(url)
         
-        # Update statistics
-        global links_processed
-        links_processed += len(urls)
-
-        # Attempt to delete the original message.
-        try:
-            await message.delete()
-            logger.info(f"Deleted original message {message.id} from {message.author}")
-        except discord.Forbidden:
-            logger.warning(f"Missing permissions to delete message {message.id} from {message.author}")
-        except discord.HTTPException as e:
-            logger.error(f"Failed to delete message {message.id}: {e}")
-
-        # Create a view with buttons for message control
-        view = MessageControlView(timeout=604800)  # 7 days timeout
-
-        # Check the user's emulation preference
+        if spoiler_urls:
+            # Process spoilered URLs automatically with a spoiler embed
+            now = time.time()
+            last_time = user_rate_limit.get(message.author.id, 0)
+            if now - last_time < RATE_LIMIT_SECONDS:
+                logger.info(f"User {message.author} is rate limited. Time since last processing: {now - last_time:.2f} seconds.")
+                return
+            user_rate_limit[message.author.id] = now
+            
+            logger.info(f"Processing spoilered message from {message.author} (ID: {message.id}) with URLs: {spoiler_urls}")
+            
+            # Sanitize and convert URLs
+            spoiler_urls = [sanitize_url(url) for url in spoiler_urls]
+            modified_spoiler_urls = [re.sub(r'(twitter\.com|x\.com)', 'vxtwitter.com', url, flags=re.IGNORECASE) for url in spoiler_urls]
+            response = "\n".join(modified_spoiler_urls)
+            
+            
+            links_processed += len(spoiler_urls)
+            
+            # Attempt to delete the original message
+            try:
+                await message.delete()
+                logger.info(f"Deleted original message {message.id} from {message.author}")
+            except discord.Forbidden:
+                logger.warning(f"Missing permissions to delete message {message.id} from {message.author}")
+            except discord.HTTPException as e:
+                logger.error(f"Failed to delete message {message.id}: {e}")
+            
+            # Create a view with buttons for message control and store the original author ID
+            view = MessageControlView(timeout=604800)  # 7 days timeout
+            view.original_author_id = message.author.id
+            
+            # Send a spoiler embed using a placeholder message then edit to include the embed
+            placeholder = "||spoiler||"
+            msg = await message.channel.send(placeholder)
+            embed = discord.Embed(
+                title="Spoiler Embed",
+                description="This tweet is hidden behind a spoiler. Click to reveal.",
+                color=0x1DA1F2
+            )
+            embed.add_field(name="Link", value=response, inline=False)
+            await msg.edit(content=placeholder, embed=embed)
+        
+        elif non_spoiler_urls:
+            # Process non-spoiler URLs as before
+            
+            now = time.time()
+            last_time = user_rate_limit.get(message.author.id, 0)
+            if now - last_time < RATE_LIMIT_SECONDS:
+                logger.info(f"User {message.author} is rate limited. Time since last processing: {now - last_time:.2f} seconds.")
+                return
+            user_rate_limit[message.author.id] = now
+            
+            logger.info(f"Processing message from {message.author} (ID: {message.id}) with URLs: {non_spoiler_urls}")
+            non_spoiler_urls = [sanitize_url(url) for url in non_spoiler_urls]
+            modified_urls = [re.sub(r'(twitter\.com|x\.com)', 'vxtwitter.com', url, flags=re.IGNORECASE) for url in non_spoiler_urls]
+            response = "\n".join(modified_urls)
+            
+            
+            links_processed += len(non_spoiler_urls)
+            
+            try:
+                await message.delete()
+                logger.info(f"Deleted original message {message.id} from {message.author}")
+            except discord.Forbidden:
+                logger.warning(f"Missing permissions to delete message {message.id} from {message.author}")
+            except discord.HTTPException as e:
+                logger.error(f"Failed to delete message {message.id}: {e}")
+            
+            view = MessageControlView(timeout=604800)
+            view.original_author_id = message.author.id
+        
+        # Check the user's emulation preference and send the message accordingly.
         should_emulate = user_emulation_preferences.get(message.author.id, DEFAULT_EMULATION)
-        
-        # Store the original author's ID in the view for later reference
-        # This helps with permission checking for buttons
         view.original_author_id = message.author.id
         
         if should_emulate:
-            # Check if the bot has the required permissions to create webhooks
             webhook_permissions = False
             if isinstance(message.channel, discord.TextChannel):
                 bot_permissions = message.channel.permissions_for(message.guild.me)
                 webhook_permissions = bot_permissions.manage_webhooks
             
             if webhook_permissions:
-                # Try sending the modified message via a webhook to mimic the user's profile.
                 try:
                     webhook = await message.channel.create_webhook(name="TempWebhook")
                     logger.info(f"Created temporary webhook in channel {message.channel} for message {message.id}")
@@ -923,9 +970,7 @@ async def on_message(message):
                     logger.info(f"Deleted temporary webhook for message {message.id}")
                 except discord.Forbidden as e:
                     logger.error(f"Webhook permission error for message {message.id}: {e}")
-                    # Fall back to non-emulation mode with an explanation
                     try:
-                        # Use user ID for the attribution
                         user_id_mention = f"<@{message.author.id}>"
                         sent_message = await message.channel.send(f"**Link shared by {user_id_mention}:**\n{response}", view=view)
                         view.message = sent_message
@@ -934,9 +979,7 @@ async def on_message(message):
                         logger.error(f"Failed to send fallback message for message {message.id}: {e2}")
                 except Exception as e:
                     logger.error(f"Webhook error for message {message.id}: {e}")
-                    # Fallback: send as the bot if webhook fails.
                     try:
-                        # Use user ID for the attribution
                         user_id_mention = f"<@{message.author.id}>"
                         sent_message = await message.channel.send(f"**Link shared by {user_id_mention}:**\n{response}", view=view)
                         view.message = sent_message
@@ -944,10 +987,8 @@ async def on_message(message):
                     except Exception as e2:
                         logger.error(f"Failed to send fallback message for message {message.id}: {e2}")
             else:
-                # No webhook permissions, inform the user via log
                 logger.warning(f"No webhook permissions in channel {message.channel.id}, using fallback method")
                 try:
-                    # Use user ID for the attribution
                     user_id_mention = f"<@{message.author.id}>"
                     sent_message = await message.channel.send(f"**Link shared by {user_id_mention}:**\n{response}", view=view)
                     view.message = sent_message
@@ -955,9 +996,7 @@ async def on_message(message):
                 except Exception as e:
                     logger.error(f"Failed to send message as bot for message {message.id}: {e}")
         else:
-            # Send as the bot directly, with attribution to the original user
             try:
-                # Use user ID for the attribution
                 user_id_mention = f"<@{message.author.id}>"
                 sent_message = await message.channel.send(f"**Link shared by {user_id_mention}:**\n{response}", view=view)
                 view.message = sent_message
