@@ -649,11 +649,16 @@ class MessageControlView(discord.ui.View):
         author_id = None
         message = interaction.message
         
+        # First check if we have the original author ID stored in the view
+        if hasattr(self, 'original_author_id') and self.original_author_id:
+            author_id = self.original_author_id
+            logger.info(f"Using stored original author ID for toggle: {author_id}")
+        
         # Log message content for debugging
         logger.info(f"Message content for toggle: {message.content}")
         
-        # Try to find an @mention in the message content with more flexible patterns
-        if message.content:
+        # If not, try to find an @mention in the message content with more flexible patterns
+        if not author_id and message.content:
             # Try different regex patterns to extract user ID
             mention_patterns = [
                 r'<@!?(\d+)>',  # Standard mention format <@123456789> or <@!123456789>
