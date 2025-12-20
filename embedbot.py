@@ -31,8 +31,8 @@ client = discord.Client(intents=intents)
 tree = discord.app_commands.CommandTree(client)
 
 # Regex to match URLs that start with http(s):// and include twitter.com or x.com
-# Excludes trailing "||" characters used for spoilers
-URL_REGEX = re.compile(r'(https?://(?:www\.)?(?:twitter\.com|x\.com)/[^\s|]+)', re.IGNORECASE)
+# Matches everything after the domain that isn't whitespace
+URL_REGEX = re.compile(r'(https?://(?:www\.)?(?:twitter\.com|x\.com)/\S+)', re.IGNORECASE)
 
 # Rate limiting configuration (per user)
 RATE_LIMIT_SECONDS = 10
@@ -139,6 +139,14 @@ def sanitize_url(url):
     """Sanitize a URL to prevent potential injection attacks"""
     # Remove any characters that aren't allowed in URLs
     return re.sub(r'[^\w\.\/\:\-\?\&\=\%]', '', url)
+
+def format_bot_response(message_text, url_list):
+    """Format the bot response by combining message text with converted URLs"""
+    url_response = "\n".join(url_list)
+    if message_text:
+        return f"{message_text}\n{url_response}"
+    else:
+        return url_response
 
 # Security event logging
 def log_security_event(event_type, user_id, guild_id=None, details=None):
@@ -871,6 +879,12 @@ async def on_message(message):
             url = match.group(0)
             start_index = match.start()
             end_index = match.end()
+            
+            # Strip trailing "||" if present (Discord spoilers)
+            if url.endswith("||"):
+                url = url[:-2]
+                end_index -= 2
+            
             url_positions.append((start_index, end_index))
             # Check if the URL is wrapped in spoiler tags '||'
             if start_index >= 2 and end_index + 2 <= len(message.content) and \
@@ -905,13 +919,9 @@ async def on_message(message):
             # Sanitize and convert URLs
             spoiler_urls = [sanitize_url(url) for url in spoiler_urls]
             modified_spoiler_urls = [re.sub(r'(twitter\.com|x\.com)', 'vxtwitter.com', url, flags=re.IGNORECASE) for url in spoiler_urls]
-            url_response = "\n".join(modified_spoiler_urls)
             
             # Combine message text with URLs
-            if message_text:
-                response = f"{message_text}\n{url_response}"
-            else:
-                response = url_response
+            response = format_bot_response(message_text, modified_spoiler_urls)
             
             links_processed += len(spoiler_urls)
             
@@ -952,13 +962,9 @@ async def on_message(message):
             logger.info(f"Processing message from {message.author} (ID: {message.id}) with URLs: {non_spoiler_urls}")
             non_spoiler_urls = [sanitize_url(url) for url in non_spoiler_urls]
             modified_urls = [re.sub(r'(twitter\.com|x\.com)', 'vxtwitter.com', url, flags=re.IGNORECASE) for url in non_spoiler_urls]
-            url_response = "\n".join(modified_urls)
             
             # Combine message text with URLs
-            if message_text:
-                response = f"{message_text}\n{url_response}"
-            else:
-                response = url_response
+            response = format_bot_response(message_text, modified_urls)
             
             links_processed += len(non_spoiler_urls)
             
