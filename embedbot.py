@@ -45,7 +45,7 @@ DEFAULT_EMULATION = True  # Default to emulating users
 # Bot statistics
 bot_start_time = time.time()
 links_processed = 0
-version = "1.2.2"  # Bot version
+version = "1.3.0"  # Bot version - Added tweet text support
 
 # Security settings
 GLOBAL_RATE_LIMIT = 30  # Maximum requests per minute across all users

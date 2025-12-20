@@ -6,6 +6,7 @@ This Discord bot looks for Twitter/X links in messages and automatically replace
 
 ### Core Functionality
 * **URL Replacement:** Finds URLs containing `twitter.com` or `x.com` and replaces them with `vxtwitter.com`
+* **Text Preservation:** Automatically preserves any text that accompanies Twitter/X links, maintaining the original message context
 * **User Emulation:** Can post links either as the original user (with their name and avatar) or as the bot with attribution
 * **Interactive Buttons:**
    * **Delete Button:** Lets the original message sender remove the bot's response
