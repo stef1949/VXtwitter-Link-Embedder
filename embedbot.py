@@ -31,7 +31,8 @@ client = discord.Client(intents=intents)
 tree = discord.app_commands.CommandTree(client)
 
 # Regex to match URLs that start with http(s):// and include twitter.com or x.com
-URL_REGEX = re.compile(r'(https?://(?:www\.)?(?:twitter\.com|x\.com)/\S+)', re.IGNORECASE)
+# Excludes trailing "||" characters used for spoilers
+URL_REGEX = re.compile(r'(https?://(?:www\.)?(?:twitter\.com|x\.com)/[^\s|]+)', re.IGNORECASE)
 
 # Rate limiting configuration (per user)
 RATE_LIMIT_SECONDS = 10
@@ -864,10 +865,13 @@ async def on_message(message):
     if matches:
         spoiler_urls = []
         non_spoiler_urls = []
+        url_positions = []  # Store positions of URLs for text extraction
+        
         for match in matches:
             url = match.group(0)
             start_index = match.start()
             end_index = match.end()
+            url_positions.append((start_index, end_index))
             # Check if the URL is wrapped in spoiler tags '||'
             if start_index >= 2 and end_index + 2 <= len(message.content) and \
                message.content[start_index-2:start_index] == "||" and \
@@ -875,6 +879,17 @@ async def on_message(message):
                 spoiler_urls.append(url)
             else:
                 non_spoiler_urls.append(url)
+        
+        # Extract the text content without the Twitter/X URLs
+        message_text = message.content
+        for start, end in sorted(url_positions, reverse=True):
+            # Also remove spoiler tags if present
+            actual_start = start - 2 if start >= 2 and message_text[start-2:start] == "||" else start
+            actual_end = end + 2 if end + 2 <= len(message_text) and message_text[end:end+2] == "||" else end
+            message_text = message_text[:actual_start] + message_text[actual_end:]
+        
+        # Clean up any double spaces and strip leading/trailing whitespace
+        message_text = re.sub(r'\s+', ' ', message_text).strip()
         
         if spoiler_urls:
             # Process spoilered URLs automatically with a spoiler embed
@@ -890,8 +905,13 @@ async def on_message(message):
             # Sanitize and convert URLs
             spoiler_urls = [sanitize_url(url) for url in spoiler_urls]
             modified_spoiler_urls = [re.sub(r'(twitter\.com|x\.com)', 'vxtwitter.com', url, flags=re.IGNORECASE) for url in spoiler_urls]
-            response = "\n".join(modified_spoiler_urls)
+            url_response = "\n".join(modified_spoiler_urls)
             
+            # Combine message text with URLs
+            if message_text:
+                response = f"{message_text}\n{url_response}"
+            else:
+                response = url_response
             
             links_processed += len(spoiler_urls)
             
@@ -932,8 +952,13 @@ async def on_message(message):
             logger.info(f"Processing message from {message.author} (ID: {message.id}) with URLs: {non_spoiler_urls}")
             non_spoiler_urls = [sanitize_url(url) for url in non_spoiler_urls]
             modified_urls = [re.sub(r'(twitter\.com|x\.com)', 'vxtwitter.com', url, flags=re.IGNORECASE) for url in non_spoiler_urls]
-            response = "\n".join(modified_urls)
+            url_response = "\n".join(modified_urls)
             
+            # Combine message text with URLs
+            if message_text:
+                response = f"{message_text}\n{url_response}"
+            else:
+                response = url_response
             
             links_processed += len(non_spoiler_urls)
             
