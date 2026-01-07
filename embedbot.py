@@ -761,109 +761,6 @@ class MessageControlView(discord.ui.View):
             logger.warning(f"Unauthorized emulation toggle attempt by {interaction.user}")
             await interaction.response.send_message("You can only change your own emulation preference.", ephemeral=True)
 
-# Create a view with buttons for TikTok message management
-class TikTokControlView(discord.ui.View):
-    def __init__(self, original_url: str, timeout: float = 604800):  # 7 days
-        super().__init__(timeout=timeout)
-        self.message = None  # Will store reference to the message
-        self.original_author_id = None  # Will store the original author's ID
-        self.original_url = original_url  # Store the original TikTok URL
-        
-        # Add the link button with the dynamic URL
-        self.add_item(discord.ui.Button(label="Open Link", style=discord.ButtonStyle.link, url=original_url))
-        
-    async def on_timeout(self):
-        """Handle the view timeout by modifying the message if possible"""
-        try:
-            # Try to disable the buttons when they time out
-            for item in self.children:
-                item.disabled = True
-                
-            # Update the message with disabled buttons if it still exists
-            if hasattr(self, "message") and self.message:
-                await self.message.edit(view=self)
-        except Exception as e:
-            logger.error(f"Error handling TikTok view timeout: {e}")
-            # Fail silently if the message was deleted or there's another issue
-
-    @discord.ui.button(label="Delete", style=discord.ButtonStyle.danger, custom_id="tiktok_delete_button")
-    async def delete_button(self, interaction: discord.Interaction, button: discord.ui.Button):
-        """Delete button for TikTok posts"""
-        logger.info(f"TikTok delete button clicked by {interaction.user} in message {interaction.message.id}")
-        
-        # Get the message to find who shared the link
-        try:
-            message = interaction.message
-            
-            # First check if we have the original author ID stored in the view
-            author_id = None
-            if hasattr(self, 'original_author_id') and self.original_author_id:
-                author_id = self.original_author_id
-                logger.info(f"Using stored original author ID: {author_id}")
-            
-            # If not, try to extract from message content
-            if not author_id:
-                # Log message content for debugging
-                logger.info(f"TikTok message content for delete: {message.content}")
-                
-                # Try to find an @mention in the message content
-                if message.content:
-                    # Try different regex patterns to extract user ID
-                    mention_patterns = [
-                        r'<@!?(\d+)>',  # Standard mention format <@123456789> or <@!123456789>
-                        r'shared by <@!?(\d+)>',  # Matches "shared by @user"
-                        r'by <@!?(\d+)>',  # Matches "by @user"
-                        r'by <@!?(\d+)',  # Without closing bracket
-                        r'<@!?(\d+)',  # Just the opening of mention
-                        r'(\d{17,20})',  # Any 17-20 digit number (likely a user ID)
-                    ]
-                    
-                    for pattern in mention_patterns:
-                        mention_match = re.search(pattern, message.content)
-                        if mention_match:
-                            author_id = int(mention_match.group(1))
-                            logger.info(f"Found author ID {author_id} using pattern {pattern}")
-                            break
-            
-            # Always allow server admins to delete
-            is_admin_in_server = False
-            if interaction.guild:
-                member = interaction.guild.get_member(interaction.user.id)
-                if member:
-                    is_admin_in_server = member.guild_permissions.administrator
-                    if is_admin_in_server:
-                        logger.info(f"User {interaction.user.id} is a server admin, allowing deletion")
-            
-            # Allow deletion by bot admins too
-            is_bot_admin = is_admin(interaction.user.id)
-            if is_bot_admin:
-                logger.info(f"User {interaction.user.id} is a bot admin, allowing deletion")
-            
-            # Always allow server owners to delete
-            is_server_owner = False
-            if interaction.guild and interaction.guild.owner_id == interaction.user.id:
-                is_server_owner = True
-                logger.info(f"User {interaction.user.id} is server owner, allowing deletion")
-        
-            # Only allow the original poster or admins to delete the message
-            logger.info(f"TikTok delete check - Author: {author_id}, User: {interaction.user.id}, Admin: {is_admin_in_server}, Owner: {is_server_owner}")
-            if (author_id and interaction.user.id == author_id) or is_admin_in_server or is_bot_admin or is_server_owner:
-                await message.delete()
-                logger.info(f"TikTok message {message.id} deleted by {interaction.user}")
-                await interaction.response.send_message("Message deleted.", ephemeral=True)
-            else:
-                logger.warning(f"Unauthorized TikTok delete attempt by {interaction.user}")
-                await interaction.response.send_message("You are not allowed to delete this message.", ephemeral=True)
-                
-        except discord.NotFound:
-            logger.error(f"TikTok message {interaction.message.id} not found when trying to delete")
-            await interaction.response.send_message("Message already deleted.", ephemeral=True)
-        except Exception as e:
-            logger.error(f"Error in TikTok delete button: {e}")
-            await interaction.response.send_message("Error processing request.", ephemeral=True)
-    
-
-
 # Error handling for Discord.py
 @tree.error
 async def on_command_error(interaction: discord.Interaction, error):
@@ -1191,21 +1088,15 @@ async def on_message(message):
                         # Clean up the file
                         cleanup_file(filepath)
                     else:
-                        # Create a view with buttons for TikTok controls
-                        tiktok_view = TikTokControlView(original_url=validated_url, timeout=604800)  # 7 days timeout
-                        tiktok_view.original_author_id = message.author.id
-                        
                         # Upload the video
                         with open(filepath, 'rb') as f:
                             file = discord.File(f, filename=os.path.basename(filepath))
                             # Delete processing message and send new message with file
                             await processing_msg.delete()
-                            sent_message = await message.channel.send(
+                            await message.channel.send(
                                 content=f"🎵 **TikTok video shared by <@{message.author.id}>:**\n{result['title']}",
-                                file=file,
-                                view=tiktok_view
+                                file=file
                             )
-                            tiktok_view.message = sent_message
                             logger.info(f"Successfully uploaded TikTok video: {result['title']}")
                         
                         # Clean up the file
