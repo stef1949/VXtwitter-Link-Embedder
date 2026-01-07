@@ -134,5 +134,13 @@ If button controls aren't working:
 ## Contributing
 Feel free to fork this repository and open issues or pull requests with improvements.
 
+## Legal & Privacy
+
+By using this bot, you agree to our:
+* [Privacy Policy](PRIVACY_POLICY.md) - How we collect, use, and protect your data
+* [Terms of Service](TERMS_OF_SERVICE.md) - Rules and guidelines for using the bot
+
+Please review these documents to understand your rights and responsibilities when using the bot.
+
 ## License
 This project is provided as-is under the terms in the LICENSE file.
