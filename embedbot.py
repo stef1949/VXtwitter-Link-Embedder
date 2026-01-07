@@ -154,18 +154,19 @@ def validate_tiktok_url(url):
         r'^https?://(?:www\.)?tiktok\.com/@[\w\.]+/video/\d+',
         r'^https?://(?:www\.)?tiktok\.com/t/[\w]+',
         r'^https?://vm\.tiktok\.com/[\w]+',
+        r'^https?://(?:www\.)?tiktok\.com/[\w]+/?',  # Short URLs like tiktok.com/ZNRrFcTFL/
     ]
     
     # Check if URL matches any valid pattern
     for pattern in valid_patterns:
         if re.match(pattern, url, re.IGNORECASE):
             # Basic sanitization - remove any trailing fragments or suspicious characters
-            # Keep only the base URL components
-            return re.sub(r'[^\w\.\/\:\-\?\&\=\%]', '', url)
+            # Keep only the base URL components, including @ symbol for TikTok usernames
+            return re.sub(r'[^\w\.\/\:\-\?\&\=\%\@]', '', url)
     
     # If no pattern matched, still return sanitized URL but log warning
     logger.warning(f"TikTok URL doesn't match expected patterns: {url}")
-    return re.sub(r'[^\w\.\/\:\-\?\&\=\%]', '', url)
+    return re.sub(r'[^\w\.\/\:\-\?\&\=\%\@]', '', url)
 
 def cleanup_file(filepath):
     """Clean up a temporary file with proper error handling"""
