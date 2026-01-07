@@ -2,6 +2,7 @@ import logging
 import yt_dlp
 import os
 import tempfile
+import glob
 
 logger = logging.getLogger(__name__)
 
@@ -51,16 +52,16 @@ def download_tiktok_video(video_url, output_folder=None):
             
             # Verify the file was actually downloaded
             if not os.path.exists(filepath):
-                # Try common variations if the exact filename doesn't exist
-                logger.warning(f"Expected file not found at {filepath}, checking directory")
-                import glob
-                possible_files = glob.glob(f"{output_folder}/*")
+                # Try to find the file with the video ID
+                video_id = info.get('id', '')
+                logger.warning(f"Expected file not found at {filepath}, searching for video ID: {video_id}")
+                possible_files = glob.glob(f"{output_folder}/{video_id}.*")
                 if possible_files:
-                    # Use the most recently created file
-                    filepath = max(possible_files, key=os.path.getctime)
-                    logger.info(f"Using file: {filepath}")
+                    # Use the first match (should only be one)
+                    filepath = possible_files[0]
+                    logger.info(f"Found file: {filepath}")
                 else:
-                    raise FileNotFoundError(f"Downloaded file not found at {filepath}")
+                    raise FileNotFoundError(f"Downloaded file not found for video ID: {video_id}")
             
         logger.info(f"Successfully downloaded TikTok video: {video_title} to {filepath}")
         

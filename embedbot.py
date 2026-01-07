@@ -140,9 +140,32 @@ def set_server_setting(server_id, key, value):
 
 def sanitize_url(url):
     """Sanitize a URL to prevent potential injection attacks"""
-    # Allow common URL characters including @ for TikTok usernames
+    # For Twitter/X URLs, use basic sanitization
     # Note: # (fragment identifier) is excluded for security
-    return re.sub(r'[^\w\.\/\:\-\?\&\=\%\@]', '', url)
+    return re.sub(r'[^\w\.\/\:\-\?\&\=\%]', '', url)
+
+def validate_tiktok_url(url):
+    """
+    Validate and sanitize a TikTok URL.
+    Returns the validated URL or raises ValueError if invalid.
+    """
+    # TikTok URL patterns we expect
+    valid_patterns = [
+        r'^https?://(?:www\.)?tiktok\.com/@[\w\.]+/video/\d+',
+        r'^https?://(?:www\.)?tiktok\.com/t/[\w]+',
+        r'^https?://vm\.tiktok\.com/[\w]+',
+    ]
+    
+    # Check if URL matches any valid pattern
+    for pattern in valid_patterns:
+        if re.match(pattern, url, re.IGNORECASE):
+            # Basic sanitization - remove any trailing fragments or suspicious characters
+            # Keep only the base URL components
+            return re.sub(r'[^\w\.\/\:\-\?\&\=\%]', '', url)
+    
+    # If no pattern matched, still return sanitized URL but log warning
+    logger.warning(f"TikTok URL doesn't match expected patterns: {url}")
+    return re.sub(r'[^\w\.\/\:\-\?\&\=\%]', '', url)
 
 def cleanup_file(filepath):
     """Clean up a temporary file with proper error handling"""
@@ -1040,14 +1063,18 @@ async def on_message(message):
         
         # Process each TikTok link
         for tiktok_url in tiktok_urls:
-            # Sanitize the URL
-            sanitized_url = sanitize_url(tiktok_url)
+            # Validate and sanitize the URL
+            try:
+                validated_url = validate_tiktok_url(tiktok_url)
+            except ValueError as e:
+                logger.error(f"Invalid TikTok URL: {e}")
+                continue
             
             # Send a processing message
             processing_msg = await message.channel.send(f"⏳ Downloading TikTok video from <@{message.author.id}>...")
             
             # Download the video
-            result = download_tiktok_video(sanitized_url)
+            result = download_tiktok_video(validated_url)
             
             if result['success']:
                 try:
