@@ -156,8 +156,10 @@ def validate_tiktok_url(url):
         r'^https?://vm\.tiktok\.com/[\w]+',
     ]
     
-    # Short URL pattern (case-sensitive path check to avoid matching common paths like "trending")
-    # TikTok short URLs typically start with uppercase or digit (e.g., ZNRrFcTFL)
+    # Short URL pattern (case-sensitive path check to avoid matching common lowercase paths)
+    # TikTok short URLs are 8-12 characters and start with uppercase letter or digit (e.g., ZNRrFcTFL)
+    # This excludes common paths like "trending", "foryou", "following" which are all lowercase
+    # If a capitalized common path is matched (e.g., "Trending"), yt-dlp will handle it gracefully
     short_url_pattern = r'^https?://(?:www\.)?tiktok\.com/[A-Z0-9][A-Za-z0-9]{7,11}/?$'
     
     # Check if URL matches any valid pattern
