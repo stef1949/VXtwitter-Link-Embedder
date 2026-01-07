@@ -813,6 +813,9 @@ class TikTokControlView(discord.ui.View):
                         r'<@!?(\d+)>',  # Standard mention format <@123456789> or <@!123456789>
                         r'by <@!?(\d+)>',  # Matches "by @user"
                         r'shared by <@!?(\d+)>',  # Matches "shared by @user"
+                        r'by <@!?(\d+)',  # Without closing bracket
+                        r'<@!?(\d+)',  # Just the opening of mention
+                        r'(\d{17,20})',  # Any 17-20 digit number (likely a user ID)
                     ]
                     
                     for pattern in mention_patterns:
