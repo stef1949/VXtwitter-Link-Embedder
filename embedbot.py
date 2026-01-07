@@ -6,6 +6,7 @@ import time
 import sys
 import asyncio
 from discord.ext import commands
+from tiktok_handler import download_tiktok_video
 
 # Configure logging to show the time, logger name, level, and message.
 logging.basicConfig(
@@ -32,6 +33,9 @@ tree = discord.app_commands.CommandTree(client)
 
 # Regex to match URLs that start with http(s):// and include twitter.com or x.com
 URL_REGEX = re.compile(r'(https?://(?:www\.)?(?:twitter\.com|x\.com)/\S+)', re.IGNORECASE)
+
+# Regex to match TikTok URLs
+TIKTOK_URL_REGEX = re.compile(r'(https?://(?:www\.)?(?:tiktok\.com|vm\.tiktok\.com)/\S+)', re.IGNORECASE)
 
 # Rate limiting configuration (per user)
 RATE_LIMIT_SECONDS = 10
@@ -1008,6 +1012,90 @@ async def on_message(message):
                 logger.info(f"Sent modified message as bot (per user preference) for message {message.id}")
             except Exception as e:
                 logger.error(f"Failed to send message as bot for message {message.id}: {e}")
+    
+    # Process TikTok links
+    tiktok_matches = list(TIKTOK_URL_REGEX.finditer(message.content))
+    if tiktok_matches:
+        # Check rate limit
+        now = time.time()
+        last_time = user_rate_limit.get(message.author.id, 0)
+        if now - last_time < RATE_LIMIT_SECONDS:
+            logger.info(f"User {message.author} is rate limited for TikTok link. Time since last processing: {now - last_time:.2f} seconds.")
+            return
+        user_rate_limit[message.author.id] = now
+        
+        # Extract TikTok URLs
+        tiktok_urls = [match.group(0) for match in tiktok_matches]
+        logger.info(f"Processing TikTok links from {message.author} (ID: {message.id}) with URLs: {tiktok_urls}")
+        
+        # Process each TikTok link
+        for tiktok_url in tiktok_urls:
+            # Sanitize the URL
+            sanitized_url = sanitize_url(tiktok_url)
+            
+            # Send a processing message
+            processing_msg = await message.channel.send(f"⏳ Downloading TikTok video from <@{message.author.id}>...")
+            
+            # Download the video
+            result = download_tiktok_video(sanitized_url)
+            
+            if result['success']:
+                try:
+                    # Check file size (Discord has a file size limit)
+                    filepath = result['filepath']
+                    file_size = os.path.getsize(filepath)
+                    
+                    # Discord's file size limit is 8MB for non-nitro, 50MB for nitro level 1, 100MB for nitro level 2
+                    # We'll use 8MB as a safe limit
+                    max_size = 8 * 1024 * 1024  # 8MB in bytes
+                    
+                    if file_size > max_size:
+                        await processing_msg.edit(content=f"❌ TikTok video is too large to upload ({file_size / 1024 / 1024:.2f}MB). Discord limit is 8MB.")
+                        logger.warning(f"TikTok video too large: {file_size} bytes")
+                        # Clean up the file
+                        try:
+                            os.remove(filepath)
+                        except:
+                            pass
+                    else:
+                        # Upload the video
+                        with open(filepath, 'rb') as f:
+                            file = discord.File(f, filename=os.path.basename(filepath))
+                            await processing_msg.edit(content=f"🎵 **TikTok video shared by <@{message.author.id}>:**\n{result['title']}")
+                            await message.channel.send(file=file)
+                            logger.info(f"Successfully uploaded TikTok video: {result['title']}")
+                        
+                        # Clean up the file
+                        try:
+                            os.remove(filepath)
+                            logger.info(f"Cleaned up temporary file: {filepath}")
+                        except Exception as e:
+                            logger.error(f"Failed to clean up file {filepath}: {e}")
+                        
+                        # Increment the links processed counter
+                        links_processed += 1
+                        
+                        # Try to delete the original message
+                        try:
+                            await message.delete()
+                            logger.info(f"Deleted original TikTok message {message.id} from {message.author}")
+                        except discord.Forbidden:
+                            logger.warning(f"Missing permissions to delete TikTok message {message.id} from {message.author}")
+                        except discord.HTTPException as e:
+                            logger.error(f"Failed to delete TikTok message {message.id}: {e}")
+                
+                except Exception as e:
+                    logger.error(f"Error uploading TikTok video: {e}")
+                    await processing_msg.edit(content=f"❌ Error uploading TikTok video: {str(e)}")
+                    # Clean up the file if it exists
+                    try:
+                        if os.path.exists(result['filepath']):
+                            os.remove(result['filepath'])
+                    except:
+                        pass
+            else:
+                await processing_msg.edit(content=f"❌ Failed to download TikTok video: {result.get('error', 'Unknown error')}")
+                logger.error(f"TikTok download failed: {result.get('error', 'Unknown error')}")
 
 # Run the bot
 client.run(TOKEN)

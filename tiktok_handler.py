@@ -1,0 +1,65 @@
+import logging
+import yt_dlp
+import os
+import tempfile
+
+logger = logging.getLogger(__name__)
+
+def download_tiktok_video(video_url, output_folder=None):
+    """
+    Downloads a TikTok video from a given URL using yt-dlp.
+    
+    Args:
+        video_url: The TikTok video URL to download
+        output_folder: Optional folder to save the video. If None, uses a temporary directory.
+    
+    Returns:
+        dict: A dictionary containing:
+            - 'success': bool indicating if download was successful
+            - 'filepath': str path to the downloaded video file (if successful)
+            - 'title': str title of the video (if available)
+            - 'error': str error message (if unsuccessful)
+    """
+    
+    if output_folder is None:
+        output_folder = tempfile.gettempdir()
+    
+    # Configuration options for yt-dlp
+    ydl_opts = {
+        'format': 'best',  # Download the best quality available
+        'outtmpl': f'{output_folder}/%(title)s.%(ext)s',  # Save as Title.mp4
+        'noplaylist': True,  # Ensure we only download a single video, not a playlist
+        'quiet': True,      # Minimize terminal output
+        'no_warnings': True,
+    }
+
+    try:
+        logger.info(f"Attempting to download TikTok video: {video_url}")
+        
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            # Extract info first to get the title and filepath
+            info = ydl.extract_info(video_url, download=False)
+            video_title = info.get('title', 'Unknown Title')
+            
+            logger.info(f"Found TikTok video: {video_title}")
+            
+            # Perform the download
+            info = ydl.extract_info(video_url, download=True)
+            
+            # Get the filepath
+            filepath = ydl.prepare_filename(info)
+            
+        logger.info(f"Successfully downloaded TikTok video: {video_title} to {filepath}")
+        
+        return {
+            'success': True,
+            'filepath': filepath,
+            'title': video_title
+        }
+
+    except Exception as e:
+        logger.error(f"Error downloading TikTok video: {e}")
+        return {
+            'success': False,
+            'error': str(e)
+        }
