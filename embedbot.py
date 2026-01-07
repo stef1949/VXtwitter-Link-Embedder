@@ -1061,15 +1061,19 @@ async def on_message(message):
                         # Upload the video
                         with open(filepath, 'rb') as f:
                             file = discord.File(f, filename=os.path.basename(filepath))
-                            await processing_msg.edit(content=f"🎵 **TikTok video shared by <@{message.author.id}>:**\n{result['title']}")
-                            await message.channel.send(file=file)
+                            # Delete processing message and send new message with file
+                            await processing_msg.delete()
+                            await message.channel.send(
+                                content=f"🎵 **TikTok video shared by <@{message.author.id}>:**\n{result['title']}",
+                                file=file
+                            )
                             logger.info(f"Successfully uploaded TikTok video: {result['title']}")
                         
                         # Clean up the file
                         try:
                             os.remove(filepath)
                             logger.info(f"Cleaned up temporary file: {filepath}")
-                        except Exception as e:
+                        except OSError as e:
                             logger.error(f"Failed to clean up file {filepath}: {e}")
                         
                         # Increment the links processed counter
