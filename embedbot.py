@@ -147,7 +147,7 @@ def sanitize_url(url):
 def validate_tiktok_url(url):
     """
     Validate and sanitize a TikTok URL.
-    Returns the validated URL or raises ValueError if invalid.
+    Returns the validated/sanitized URL. Logs a warning if URL doesn't match expected patterns.
     """
     # TikTok URL patterns we expect
     valid_patterns = [
@@ -1064,11 +1064,7 @@ async def on_message(message):
         # Process each TikTok link
         for tiktok_url in tiktok_urls:
             # Validate and sanitize the URL
-            try:
-                validated_url = validate_tiktok_url(tiktok_url)
-            except ValueError as e:
-                logger.error(f"Invalid TikTok URL: {e}")
-                continue
+            validated_url = validate_tiktok_url(tiktok_url)
             
             # Send a processing message
             processing_msg = await message.channel.send(f"⏳ Downloading TikTok video from <@{message.author.id}>...")
