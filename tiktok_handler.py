@@ -57,7 +57,14 @@ def download_tiktok_video(video_url, output_folder=None):
             'title': video_title
         }
 
+    except (OSError, IOError) as e:
+        logger.error(f"File system error downloading TikTok video: {e}")
+        return {
+            'success': False,
+            'error': f"File system error: {str(e)}"
+        }
     except Exception as e:
+        # Catch yt-dlp exceptions and other unexpected errors
         logger.error(f"Error downloading TikTok video: {e}")
         return {
             'success': False,

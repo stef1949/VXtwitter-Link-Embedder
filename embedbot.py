@@ -141,7 +141,8 @@ def set_server_setting(server_id, key, value):
 def sanitize_url(url):
     """Sanitize a URL to prevent potential injection attacks"""
     # Allow common URL characters including @ for TikTok usernames
-    return re.sub(r'[^\w\.\/\:\-\?\&\=\%\@\#]', '', url)
+    # Note: # (fragment identifier) is excluded for security
+    return re.sub(r'[^\w\.\/\:\-\?\&\=\%\@]', '', url)
 
 # Security event logging
 def log_security_event(event_type, user_id, guild_id=None, details=None):
@@ -1088,7 +1089,7 @@ async def on_message(message):
                         except discord.HTTPException as e:
                             logger.error(f"Failed to delete TikTok message {message.id}: {e}")
                 
-                except Exception as e:
+                except (discord.HTTPException, discord.Forbidden, OSError, IOError) as e:
                     logger.error(f"Error uploading TikTok video: {e}")
                     await processing_msg.edit(content=f"❌ Error uploading TikTok video: {str(e)}")
                     # Clean up the file if it exists
