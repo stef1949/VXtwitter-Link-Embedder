@@ -811,8 +811,8 @@ class TikTokControlView(discord.ui.View):
                     # Try different regex patterns to extract user ID
                     mention_patterns = [
                         r'<@!?(\d+)>',  # Standard mention format <@123456789> or <@!123456789>
-                        r'by <@!?(\d+)>',  # Matches "by @user"
                         r'shared by <@!?(\d+)>',  # Matches "shared by @user"
+                        r'by <@!?(\d+)>',  # Matches "by @user"
                         r'by <@!?(\d+)',  # Without closing bracket
                         r'<@!?(\d+)',  # Just the opening of mention
                         r'(\d{17,20})',  # Any 17-20 digit number (likely a user ID)
@@ -827,11 +827,12 @@ class TikTokControlView(discord.ui.View):
             
             # Always allow server admins to delete
             is_admin_in_server = False
-            if interaction.guild and interaction.guild.get_member(interaction.user.id):
+            if interaction.guild:
                 member = interaction.guild.get_member(interaction.user.id)
-                is_admin_in_server = member.guild_permissions.administrator
-                if is_admin_in_server:
-                    logger.info(f"User {interaction.user.id} is a server admin, allowing deletion")
+                if member:
+                    is_admin_in_server = member.guild_permissions.administrator
+                    if is_admin_in_server:
+                        logger.info(f"User {interaction.user.id} is a server admin, allowing deletion")
             
             # Allow deletion by bot admins too
             is_bot_admin = is_admin(interaction.user.id)
