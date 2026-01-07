@@ -149,23 +149,33 @@ def validate_tiktok_url(url):
     Validate and sanitize a TikTok URL.
     Returns the validated/sanitized URL. Logs a warning if URL doesn't match expected patterns.
     """
-    # TikTok URL patterns we expect
-    valid_patterns = [
+    # TikTok URL patterns we expect (checked with re.IGNORECASE)
+    case_insensitive_patterns = [
         r'^https?://(?:www\.)?tiktok\.com/@[\w\.]+/video/\d+',
         r'^https?://(?:www\.)?tiktok\.com/t/[\w]+',
         r'^https?://vm\.tiktok\.com/[\w]+',
-        r'^https?://(?:www\.)?tiktok\.com/[\w]+/?',  # Short URLs like tiktok.com/ZNRrFcTFL/
     ]
     
-    # Check if URL matches any valid pattern
-    for pattern in valid_patterns:
-        if re.match(pattern, url, re.IGNORECASE):
-            # Basic sanitization - remove any trailing fragments or suspicious characters
-            # Keep only the base URL components, including @ symbol for TikTok usernames
-            return re.sub(r'[^\w\.\/\:\-\?\&\=\%\@]', '', url)
+    # Short URL pattern (case-sensitive path check to avoid matching common paths like "trending")
+    # TikTok short URLs typically start with uppercase or digit (e.g., ZNRrFcTFL)
+    short_url_pattern = r'^https?://(?:www\.)?tiktok\.com/[A-Z0-9][A-Za-z0-9]{7,11}/?$'
     
-    # If no pattern matched, still return sanitized URL but log warning
-    logger.warning(f"TikTok URL doesn't match expected patterns: {url}")
+    # Check if URL matches any valid pattern
+    matched = False
+    for pattern in case_insensitive_patterns:
+        if re.match(pattern, url, re.IGNORECASE):
+            matched = True
+            break
+    
+    # Check short URL pattern without IGNORECASE for the path part
+    if not matched and re.match(short_url_pattern, url):
+        matched = True
+    
+    if not matched:
+        logger.warning(f"TikTok URL doesn't match expected patterns: {url}")
+    
+    # Basic sanitization - remove any trailing fragments or suspicious characters
+    # Keep only the base URL components, including @ symbol for TikTok usernames
     return re.sub(r'[^\w\.\/\:\-\?\&\=\%\@]', '', url)
 
 def cleanup_file(filepath):
