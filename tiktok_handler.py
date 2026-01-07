@@ -27,7 +27,7 @@ def download_tiktok_video(video_url, output_folder=None):
     # Configuration options for yt-dlp
     ydl_opts = {
         'format': 'best',  # Download the best quality available
-        'outtmpl': f'{output_folder}/%(title)s.%(ext)s',  # Save as Title.mp4
+        'outtmpl': f'{output_folder}/%(id)s.%(ext)s',  # Use video ID for safe filename
         'noplaylist': True,  # Ensure we only download a single video, not a playlist
         'quiet': True,      # Minimize terminal output
         'no_warnings': True,

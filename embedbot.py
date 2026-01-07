@@ -140,8 +140,8 @@ def set_server_setting(server_id, key, value):
 
 def sanitize_url(url):
     """Sanitize a URL to prevent potential injection attacks"""
-    # Remove any characters that aren't allowed in URLs
-    return re.sub(r'[^\w\.\/\:\-\?\&\=\%]', '', url)
+    # Allow common URL characters including @ for TikTok usernames
+    return re.sub(r'[^\w\.\/\:\-\?\&\=\%\@\#]', '', url)
 
 # Security event logging
 def log_security_event(event_type, user_id, guild_id=None, details=None):
@@ -1055,8 +1055,8 @@ async def on_message(message):
                         # Clean up the file
                         try:
                             os.remove(filepath)
-                        except:
-                            pass
+                        except OSError as e:
+                            logger.warning(f"Failed to clean up file {filepath}: {e}")
                     else:
                         # Upload the video
                         with open(filepath, 'rb') as f:
@@ -1091,8 +1091,8 @@ async def on_message(message):
                     try:
                         if os.path.exists(result['filepath']):
                             os.remove(result['filepath'])
-                    except:
-                        pass
+                    except OSError as e:
+                        logger.warning(f"Failed to clean up file {result['filepath']}: {e}")
             else:
                 await processing_msg.edit(content=f"❌ Failed to download TikTok video: {result.get('error', 'Unknown error')}")
                 logger.error(f"TikTok download failed: {result.get('error', 'Unknown error')}")
