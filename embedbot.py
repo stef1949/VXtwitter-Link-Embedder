@@ -144,6 +144,15 @@ def sanitize_url(url):
     # Note: # (fragment identifier) is excluded for security
     return re.sub(r'[^\w\.\/\:\-\?\&\=\%\@]', '', url)
 
+def cleanup_file(filepath):
+    """Clean up a temporary file with proper error handling"""
+    try:
+        if os.path.exists(filepath):
+            os.remove(filepath)
+            logger.info(f"Cleaned up temporary file: {filepath}")
+    except OSError as e:
+        logger.warning(f"Failed to clean up file {filepath}: {e}")
+
 # Security event logging
 def log_security_event(event_type, user_id, guild_id=None, details=None):
     """Log security-related events for auditing"""
@@ -1054,10 +1063,7 @@ async def on_message(message):
                         await processing_msg.edit(content=f"❌ TikTok video is too large to upload ({file_size / 1024 / 1024:.2f}MB). Discord limit is 8MB.")
                         logger.warning(f"TikTok video too large: {file_size} bytes")
                         # Clean up the file
-                        try:
-                            os.remove(filepath)
-                        except OSError as e:
-                            logger.warning(f"Failed to clean up file {filepath}: {e}")
+                        cleanup_file(filepath)
                     else:
                         # Upload the video
                         with open(filepath, 'rb') as f:
@@ -1071,11 +1077,7 @@ async def on_message(message):
                             logger.info(f"Successfully uploaded TikTok video: {result['title']}")
                         
                         # Clean up the file
-                        try:
-                            os.remove(filepath)
-                            logger.info(f"Cleaned up temporary file: {filepath}")
-                        except OSError as e:
-                            logger.error(f"Failed to clean up file {filepath}: {e}")
+                        cleanup_file(filepath)
                         
                         # Increment the links processed counter
                         links_processed += 1
@@ -1093,11 +1095,7 @@ async def on_message(message):
                     logger.error(f"Error uploading TikTok video: {e}")
                     await processing_msg.edit(content=f"❌ Error uploading TikTok video: {str(e)}")
                     # Clean up the file if it exists
-                    try:
-                        if os.path.exists(result['filepath']):
-                            os.remove(result['filepath'])
-                    except OSError as e:
-                        logger.warning(f"Failed to clean up file {result['filepath']}: {e}")
+                    cleanup_file(result['filepath'])
             else:
                 await processing_msg.edit(content=f"❌ Failed to download TikTok video: {result.get('error', 'Unknown error')}")
                 logger.error(f"TikTok download failed: {result.get('error', 'Unknown error')}")

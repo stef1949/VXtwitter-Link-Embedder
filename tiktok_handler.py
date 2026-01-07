@@ -49,6 +49,19 @@ def download_tiktok_video(video_url, output_folder=None):
             # Get the filepath
             filepath = ydl.prepare_filename(info)
             
+            # Verify the file was actually downloaded
+            if not os.path.exists(filepath):
+                # Try common variations if the exact filename doesn't exist
+                logger.warning(f"Expected file not found at {filepath}, checking directory")
+                import glob
+                possible_files = glob.glob(f"{output_folder}/*")
+                if possible_files:
+                    # Use the most recently created file
+                    filepath = max(possible_files, key=os.path.getctime)
+                    logger.info(f"Using file: {filepath}")
+                else:
+                    raise FileNotFoundError(f"Downloaded file not found at {filepath}")
+            
         logger.info(f"Successfully downloaded TikTok video: {video_title} to {filepath}")
         
         return {
