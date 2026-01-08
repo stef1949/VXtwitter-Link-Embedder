@@ -7,6 +7,7 @@ import sys
 import asyncio
 from discord.ext import commands
 from tiktok_handler import download_tiktok_video
+from instagram_handler import download_instagram_video
 
 # Configure logging to show the time, logger name, level, and message.
 logging.basicConfig(
@@ -36,6 +37,9 @@ URL_REGEX = re.compile(r'(https?://(?:www\.)?(?:twitter\.com|x\.com)/\S+)', re.I
 
 # Regex to match TikTok URLs
 TIKTOK_URL_REGEX = re.compile(r'(https?://(?:www\.)?(?:tiktok\.com|vm\.tiktok\.com)/\S+)', re.IGNORECASE)
+
+# Regex to match Instagram URLs (posts, reels, stories, and short URLs)
+INSTAGRAM_URL_REGEX = re.compile(r'(https?://(?:www\.)?(?:instagram\.com|instagr\.am)/(?:p|reels?|tv|stories)/\S+)', re.IGNORECASE)
 
 # Rate limiting configuration (per user)
 RATE_LIMIT_SECONDS = 10
@@ -180,6 +184,35 @@ def validate_tiktok_url(url):
     # Basic sanitization - remove any trailing fragments or suspicious characters
     # Keep only the base URL components, including @ symbol for TikTok usernames
     return re.sub(r'[^\w\.\/\:\-\?\&\=\%\@]', '', url)
+
+def validate_instagram_url(url):
+    """
+    Validate and sanitize an Instagram URL.
+    Returns the validated/sanitized URL. Logs a warning if URL doesn't match expected patterns.
+    """
+    # Instagram URL patterns we expect
+    patterns = [
+        r'^https?://(?:www\.)?instagram\.com/p/[\w\-]+',  # Posts
+        r'^https?://(?:www\.)?instagram\.com/reels?/[\w\-]+',  # Reels (reel or reels)
+        r'^https?://(?:www\.)?instagram\.com/tv/[\w\-]+',  # IGTV
+        r'^https?://(?:www\.)?instagram\.com/stories/[\w\.]+/\d+',  # Stories
+        r'^https?://(?:www\.)?instagr\.am/p/[\w\-]+',  # Short URL posts
+        r'^https?://(?:www\.)?instagr\.am/reels?/[\w\-]+',  # Short URL reels
+    ]
+    
+    # Check if URL matches any valid pattern
+    matched = False
+    for pattern in patterns:
+        if re.match(pattern, url, re.IGNORECASE):
+            matched = True
+            break
+    
+    if not matched:
+        logger.warning(f"Instagram URL doesn't match expected patterns: {url}")
+    
+    # Basic sanitization - remove any trailing fragments or suspicious characters
+    # Keep only the base URL components
+    return re.sub(r'[^\w\.\/\:\-\?\&\=\%]', '', url)
 
 def cleanup_file(filepath):
     """Clean up a temporary file with proper error handling"""
@@ -877,6 +910,108 @@ class TikTokControlView(discord.ui.View):
             await interaction.response.send_message("Error processing request.", ephemeral=True)
     
 
+# Create a view with buttons for Instagram message management
+class InstagramControlView(discord.ui.View):
+    def __init__(self, original_url: str, timeout: float = 604800):  # 7 days
+        super().__init__(timeout=timeout)
+        self.message = None  # Will store reference to the message
+        self.original_author_id = None  # Will store the original author's ID
+        self.original_url = original_url  # Store the original Instagram URL
+        
+        # Add the link button with the dynamic URL
+        self.add_item(discord.ui.Button(label="Open Link", style=discord.ButtonStyle.link, url=original_url))
+        
+    async def on_timeout(self):
+        """Handle the view timeout by modifying the message if possible"""
+        try:
+            # Try to disable the buttons when they time out
+            for item in self.children:
+                item.disabled = True
+                
+            # Update the message with disabled buttons if it still exists
+            if hasattr(self, "message") and self.message:
+                await self.message.edit(view=self)
+        except Exception as e:
+            logger.error(f"Error handling Instagram view timeout: {e}")
+            # Fail silently if the message was deleted or there's another issue
+
+    @discord.ui.button(label="Delete", style=discord.ButtonStyle.danger, custom_id="instagram_delete_button")
+    async def delete_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        """Delete button for Instagram posts"""
+        logger.info(f"Instagram delete button clicked by {interaction.user} in message {interaction.message.id}")
+        
+        # Get the message to find who shared the link
+        try:
+            message = interaction.message
+            
+            # First check if we have the original author ID stored in the view
+            author_id = None
+            if hasattr(self, 'original_author_id') and self.original_author_id:
+                author_id = self.original_author_id
+                logger.info(f"Using stored original author ID: {author_id}")
+            
+            # If not, try to extract from message content
+            if not author_id:
+                # Log message content for debugging
+                logger.info(f"Instagram message content for delete: {message.content}")
+                
+                # Try to find an @mention in the message content
+                if message.content:
+                    # Try different regex patterns to extract user ID
+                    mention_patterns = [
+                        r'<@!?(\d+)>',  # Standard mention format <@123456789> or <@!123456789>
+                        r'shared by <@!?(\d+)>',  # Matches "shared by @user"
+                        r'by <@!?(\d+)>',  # Matches "by @user"
+                        r'by <@!?(\d+)',  # Without closing bracket
+                        r'<@!?(\d+)',  # Just the opening of mention
+                        r'(\d{17,20})',  # Any 17-20 digit number (likely a user ID)
+                    ]
+                    
+                    for pattern in mention_patterns:
+                        mention_match = re.search(pattern, message.content)
+                        if mention_match:
+                            author_id = int(mention_match.group(1))
+                            logger.info(f"Found author ID {author_id} using pattern {pattern}")
+                            break
+            
+            # Always allow server admins to delete
+            is_admin_in_server = False
+            if interaction.guild:
+                member = interaction.guild.get_member(interaction.user.id)
+                if member:
+                    is_admin_in_server = member.guild_permissions.administrator
+                    if is_admin_in_server:
+                        logger.info(f"User {interaction.user.id} is a server admin, allowing deletion")
+            
+            # Allow deletion by bot admins too
+            is_bot_admin = is_admin(interaction.user.id)
+            if is_bot_admin:
+                logger.info(f"User {interaction.user.id} is a bot admin, allowing deletion")
+            
+            # Always allow server owners to delete
+            is_server_owner = False
+            if interaction.guild and interaction.guild.owner_id == interaction.user.id:
+                is_server_owner = True
+                logger.info(f"User {interaction.user.id} is server owner, allowing deletion")
+        
+            # Only allow the original poster or admins to delete the message
+            logger.info(f"Instagram delete check - Author: {author_id}, User: {interaction.user.id}, Admin: {is_admin_in_server}, Owner: {is_server_owner}")
+            if (author_id and interaction.user.id == author_id) or is_admin_in_server or is_bot_admin or is_server_owner:
+                await message.delete()
+                logger.info(f"Instagram message {message.id} deleted by {interaction.user}")
+                await interaction.response.send_message("Message deleted.", ephemeral=True)
+            else:
+                logger.warning(f"Unauthorized Instagram delete attempt by {interaction.user}")
+                await interaction.response.send_message("You are not allowed to delete this message.", ephemeral=True)
+                
+        except discord.NotFound:
+            logger.error(f"Instagram message {interaction.message.id} not found when trying to delete")
+            await interaction.response.send_message("Message already deleted.", ephemeral=True)
+        except Exception as e:
+            logger.error(f"Error in Instagram delete button: {e}")
+            await interaction.response.send_message("Error processing request.", ephemeral=True)
+    
+
 
 # Error handling for Discord.py
 @tree.error
@@ -1245,6 +1380,89 @@ async def on_message(message):
             else:
                 await processing_msg.edit(content=f"❌ Failed to download TikTok video: {result.get('error', 'Unknown error')}")
                 logger.error(f"TikTok download failed: {result.get('error', 'Unknown error')}")
+    
+    # Process Instagram links
+    instagram_matches = list(INSTAGRAM_URL_REGEX.finditer(message.content))
+    if instagram_matches:
+        # Check rate limit
+        now = time.time()
+        last_time = user_rate_limit.get(message.author.id, 0)
+        if now - last_time < RATE_LIMIT_SECONDS:
+            logger.info(f"User {message.author} is rate limited for Instagram link. Time since last processing: {now - last_time:.2f} seconds.")
+            return
+        user_rate_limit[message.author.id] = now
+        
+        # Extract Instagram URLs
+        instagram_urls = [match.group(0) for match in instagram_matches]
+        logger.info(f"Processing Instagram links from {message.author} (ID: {message.id}) with URLs: {instagram_urls}")
+        
+        # Process each Instagram link
+        for instagram_url in instagram_urls:
+            # Validate and sanitize the URL
+            validated_url = validate_instagram_url(instagram_url)
+            
+            # Send a processing message
+            processing_msg = await message.channel.send(f"⏳ Downloading Instagram video from <@{message.author.id}>...")
+            
+            # Download the video
+            result = download_instagram_video(validated_url)
+            
+            if result['success']:
+                try:
+                    # Check file size (Discord has a file size limit)
+                    filepath = result['filepath']
+                    file_size = os.path.getsize(filepath)
+                    
+                    # Discord's file size limit is 8MB for non-nitro, 50MB for nitro level 1, 100MB for nitro level 2
+                    # We'll use 8MB as a safe limit
+                    max_size = 8 * 1024 * 1024  # 8MB in bytes
+                    
+                    if file_size > max_size:
+                        await processing_msg.edit(content=f"❌ Instagram video is too large to upload ({file_size / 1024 / 1024:.2f}MB). Discord limit is 8MB.")
+                        logger.warning(f"Instagram video too large: {file_size} bytes")
+                        # Clean up the file
+                        cleanup_file(filepath)
+                    else:
+                        # Create a view with buttons for Instagram controls
+                        instagram_view = InstagramControlView(original_url=validated_url, timeout=604800)  # 7 days timeout
+                        instagram_view.original_author_id = message.author.id
+                        
+                        # Upload the video
+                        with open(filepath, 'rb') as f:
+                            file = discord.File(f, filename=os.path.basename(filepath))
+                            # Delete processing message and send new message with file
+                            await processing_msg.delete()
+                            sent_message = await message.channel.send(
+                                content=f"📸 **Instagram video shared by <@{message.author.id}>:**\n{result['title']}",
+                                file=file,
+                                view=instagram_view
+                            )
+                            instagram_view.message = sent_message
+                            logger.info(f"Successfully uploaded Instagram video: {result['title']}")
+                        
+                        # Clean up the file
+                        cleanup_file(filepath)
+                        
+                        # Increment the links processed counter
+                        links_processed += 1
+                        
+                        # Try to delete the original message
+                        try:
+                            await message.delete()
+                            logger.info(f"Deleted original Instagram message {message.id} from {message.author}")
+                        except discord.Forbidden:
+                            logger.warning(f"Missing permissions to delete Instagram message {message.id} from {message.author}")
+                        except discord.HTTPException as e:
+                            logger.error(f"Failed to delete Instagram message {message.id}: {e}")
+                
+                except (discord.HTTPException, discord.Forbidden, OSError, IOError) as e:
+                    logger.error(f"Error uploading Instagram video: {e}")
+                    await processing_msg.edit(content=f"❌ Error uploading Instagram video: {str(e)}")
+                    # Clean up the file if it exists
+                    cleanup_file(result['filepath'])
+            else:
+                await processing_msg.edit(content=f"❌ Failed to download Instagram video: {result.get('error', 'Unknown error')}")
+                logger.error(f"Instagram download failed: {result.get('error', 'Unknown error')}")
 
 # Run the bot
 client.run(TOKEN)

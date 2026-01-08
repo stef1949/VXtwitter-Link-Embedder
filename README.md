@@ -1,12 +1,13 @@
 <h1 align="center"> vxtwitter Link Bot </h1> <p align="center"> <img src="https://github.com/stef1949/Vxtwitter-Link-Embedder/blob/main/38CD6CE0-EFF2-48DE-9487-75D414D104E8.png?raw=true " width="200"> <p/>
 
-This Discord bot looks for Twitter/X links in messages and automatically replaces them with `vxtwitter.com` links. It also supports downloading and sharing TikTok videos directly in Discord. It includes user identity emulation, interactive buttons, and comprehensive admin controls.
+This Discord bot looks for Twitter/X links in messages and automatically replaces them with `vxtwitter.com` links. It also supports downloading and sharing TikTok and Instagram videos directly in Discord. It includes user identity emulation, interactive buttons, and comprehensive admin controls.
 
 ## Features
 
 ### Core Functionality
 * **URL Replacement:** Finds URLs containing `twitter.com` or `x.com` and replaces them with `vxtwitter.com`
 * **TikTok Video Downloads:** Automatically downloads and shares TikTok videos when TikTok links are posted
+* **Instagram Video Downloads:** Automatically downloads and shares Instagram videos/reels when Instagram links are posted
 * **User Emulation:** Can post links either as the original user (with their name and avatar) or as the bot with attribution
 * **Interactive Buttons:**
    * **Delete Button:** Lets the original message sender remove the bot's response
@@ -77,6 +78,21 @@ When you share a TikTok link in a channel where the bot is active:
 * The video is uploaded directly to Discord (if under 8MB file size limit)
 * The original message is deleted and replaced with the downloaded video
 * The bot attributes the video to you with a mention
+
+**Note:** Videos larger than 8MB cannot be uploaded due to Discord's file size limits.
+
+### Instagram Video Downloads
+When you share an Instagram link (posts, reels, IGTV) in a channel where the bot is active:
+* The bot automatically downloads the video using yt-dlp
+* The video is uploaded directly to Discord (if under 8MB file size limit)
+* The original message is deleted and replaced with the downloaded video
+* The bot attributes the video to you with a mention
+
+**Supported Instagram URL formats:**
+* Posts: `https://www.instagram.com/p/...`
+* Reels: `https://www.instagram.com/reel/...` or `https://www.instagram.com/reels/...`
+* IGTV: `https://www.instagram.com/tv/...`
+* Stories: `https://www.instagram.com/stories/...`
 
 **Note:** Videos larger than 8MB cannot be uploaded due to Discord's file size limits.
 
