@@ -39,7 +39,7 @@ URL_REGEX = re.compile(r'(https?://(?:www\.)?(?:twitter\.com|x\.com)/\S+)', re.I
 TIKTOK_URL_REGEX = re.compile(r'(https?://(?:www\.)?(?:tiktok\.com|vm\.tiktok\.com)/\S+)', re.IGNORECASE)
 
 # Regex to match Instagram URLs (posts, reels, stories, and short URLs)
-INSTAGRAM_URL_REGEX = re.compile(r'(https?://(?:www\.)?(?:instagram\.com|instagr\.am)/(?:p|reel|reels|tv|stories)/\S+)', re.IGNORECASE)
+INSTAGRAM_URL_REGEX = re.compile(r'(https?://(?:www\.)?(?:instagram\.com|instagr\.am)/(?:p|reels?|tv|stories)/\S+)', re.IGNORECASE)
 
 # Rate limiting configuration (per user)
 RATE_LIMIT_SECONDS = 10
@@ -193,12 +193,11 @@ def validate_instagram_url(url):
     # Instagram URL patterns we expect
     patterns = [
         r'^https?://(?:www\.)?instagram\.com/p/[\w\-]+',  # Posts
-        r'^https?://(?:www\.)?instagram\.com/reel/[\w\-]+',  # Reels
-        r'^https?://(?:www\.)?instagram\.com/reels/[\w\-]+',  # Reels (alternate)
+        r'^https?://(?:www\.)?instagram\.com/reels?/[\w\-]+',  # Reels (reel or reels)
         r'^https?://(?:www\.)?instagram\.com/tv/[\w\-]+',  # IGTV
         r'^https?://(?:www\.)?instagram\.com/stories/[\w\.]+/\d+',  # Stories
         r'^https?://(?:www\.)?instagr\.am/p/[\w\-]+',  # Short URL posts
-        r'^https?://(?:www\.)?instagr\.am/reel/[\w\-]+',  # Short URL reels
+        r'^https?://(?:www\.)?instagr\.am/reels?/[\w\-]+',  # Short URL reels
     ]
     
     # Check if URL matches any valid pattern
