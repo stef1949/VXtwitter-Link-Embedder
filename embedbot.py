@@ -1335,10 +1335,14 @@ async def on_message(message):
                     max_size = 8 * 1024 * 1024  # 8MB in bytes
                     
                     if file_size > max_size:
-                        await processing_msg.edit(content=f"❌ TikTok video is too large to upload ({file_size / 1024 / 1024:.2f}MB). Discord limit is 8MB.")
                         logger.warning(f"TikTok video too large: {file_size} bytes")
                         # Clean up the file
                         cleanup_file(filepath)
+                        # Delete the processing message silently
+                        try:
+                            await processing_msg.delete()
+                        except:
+                            pass
                     else:
                         # Create a view with buttons for TikTok controls
                         tiktok_view = TikTokControlView(original_url=validated_url, timeout=604800)  # 7 days timeout
@@ -1374,12 +1378,20 @@ async def on_message(message):
                 
                 except (discord.HTTPException, discord.Forbidden, OSError, IOError) as e:
                     logger.error(f"Error uploading TikTok video: {e}")
-                    await processing_msg.edit(content="❌ Failed to upload TikTok video.")
                     # Clean up the file if it exists
                     cleanup_file(result['filepath'])
+                    # Delete the processing message silently
+                    try:
+                        await processing_msg.delete()
+                    except:
+                        pass
             else:
                 logger.error(f"TikTok download failed: {result.get('error', 'Unknown error')}")
-                await processing_msg.edit(content="❌ Failed to download TikTok video.")
+                # Delete the processing message silently
+                try:
+                    await processing_msg.delete()
+                except:
+                    pass
     
     # Process Instagram links
     instagram_matches = list(INSTAGRAM_URL_REGEX.finditer(message.content))
@@ -1418,10 +1430,14 @@ async def on_message(message):
                     max_size = 8 * 1024 * 1024  # 8MB in bytes
                     
                     if file_size > max_size:
-                        await processing_msg.edit(content=f"❌ Instagram video is too large to upload ({file_size / 1024 / 1024:.2f}MB). Discord limit is 8MB.")
                         logger.warning(f"Instagram video too large: {file_size} bytes")
                         # Clean up the file
                         cleanup_file(filepath)
+                        # Delete the processing message silently
+                        try:
+                            await processing_msg.delete()
+                        except:
+                            pass
                     else:
                         # Create a view with buttons for Instagram controls
                         instagram_view = InstagramControlView(original_url=validated_url, timeout=604800)  # 7 days timeout
@@ -1457,12 +1473,20 @@ async def on_message(message):
                 
                 except (discord.HTTPException, discord.Forbidden, OSError, IOError) as e:
                     logger.error(f"Error uploading Instagram video: {e}")
-                    await processing_msg.edit(content="❌ Failed to upload Instagram video.")
                     # Clean up the file if it exists
                     cleanup_file(result['filepath'])
+                    # Delete the processing message silently
+                    try:
+                        await processing_msg.delete()
+                    except:
+                        pass
             else:
                 logger.error(f"Instagram download failed: {result.get('error', 'Unknown error')}")
-                await processing_msg.edit(content="❌ Failed to download Instagram video.")
+                # Delete the processing message silently
+                try:
+                    await processing_msg.delete()
+                except:
+                    pass
 
 # Run the bot
 client.run(TOKEN)
