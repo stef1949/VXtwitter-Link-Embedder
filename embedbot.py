@@ -223,6 +223,15 @@ def cleanup_file(filepath):
     except OSError as e:
         logger.warning(f"Failed to clean up file {filepath}: {e}")
 
+async def delete_message_silently(message):
+    """Delete a Discord message silently without raising errors"""
+    try:
+        await message.delete()
+    except (discord.NotFound, discord.Forbidden, discord.HTTPException) as e:
+        logger.debug(f"Could not delete message {message.id}: {e}")
+    except Exception as e:
+        logger.warning(f"Unexpected error deleting message {message.id}: {e}")
+
 # Security event logging
 def log_security_event(event_type, user_id, guild_id=None, details=None):
     """Log security-related events for auditing"""
@@ -1339,10 +1348,7 @@ async def on_message(message):
                         # Clean up the file
                         cleanup_file(filepath)
                         # Delete the processing message silently
-                        try:
-                            await processing_msg.delete()
-                        except:
-                            pass
+                        await delete_message_silently(processing_msg)
                     else:
                         # Create a view with buttons for TikTok controls
                         tiktok_view = TikTokControlView(original_url=validated_url, timeout=604800)  # 7 days timeout
@@ -1381,17 +1387,11 @@ async def on_message(message):
                     # Clean up the file if it exists
                     cleanup_file(result['filepath'])
                     # Delete the processing message silently
-                    try:
-                        await processing_msg.delete()
-                    except:
-                        pass
+                    await delete_message_silently(processing_msg)
             else:
                 logger.error(f"TikTok download failed: {result.get('error', 'Unknown error')}")
                 # Delete the processing message silently
-                try:
-                    await processing_msg.delete()
-                except:
-                    pass
+                await delete_message_silently(processing_msg)
     
     # Process Instagram links
     instagram_matches = list(INSTAGRAM_URL_REGEX.finditer(message.content))
@@ -1434,10 +1434,7 @@ async def on_message(message):
                         # Clean up the file
                         cleanup_file(filepath)
                         # Delete the processing message silently
-                        try:
-                            await processing_msg.delete()
-                        except:
-                            pass
+                        await delete_message_silently(processing_msg)
                     else:
                         # Create a view with buttons for Instagram controls
                         instagram_view = InstagramControlView(original_url=validated_url, timeout=604800)  # 7 days timeout
@@ -1476,17 +1473,11 @@ async def on_message(message):
                     # Clean up the file if it exists
                     cleanup_file(result['filepath'])
                     # Delete the processing message silently
-                    try:
-                        await processing_msg.delete()
-                    except:
-                        pass
+                    await delete_message_silently(processing_msg)
             else:
                 logger.error(f"Instagram download failed: {result.get('error', 'Unknown error')}")
                 # Delete the processing message silently
-                try:
-                    await processing_msg.delete()
-                except:
-                    pass
+                await delete_message_silently(processing_msg)
 
 # Run the bot
 client.run(TOKEN)
