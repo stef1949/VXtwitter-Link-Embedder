@@ -41,8 +41,10 @@ This Discord bot looks for Twitter/X links in messages and automatically replace
 ## Prerequisites
 * Python 3.8+
 * Discord.py 2.0+
-* yt-dlp (for TikTok video downloads)
+* yt-dlp (for TikTok and Instagram video downloads)
+* FFmpeg (for video processing)
 * A Discord bot token
+* *Optional:* NVIDIA GPU with NVENC support for hardware-accelerated video encoding
 
 ## Setup
 1. **Clone the repository**
@@ -55,16 +57,38 @@ pip install -r requirements.txt
 3. **Set up your environment variables:** Make sure to set your Discord bot token in your environment variables.
 
 ```
-export DISCORD_TOKEN=your_token_here
+export DISCORD_BOT_TOKEN=your_token_here
 ```
 
 Or create a `.env` file with:
 
 ```
-DISCORD_TOKEN=your_token_here
+DISCORD_BOT_TOKEN=your_token_here
 ```
 
-4. **Run the bot:** Launch the bot by running:
+4. **Optional: Enable NVIDIA GPU Encoding:** If you have an NVIDIA GPU with NVENC support, you can enable hardware-accelerated encoding:
+
+```
+export USE_NVIDIA_GPU=true
+```
+
+Or add to your `.env` file:
+
+```
+USE_NVIDIA_GPU=true
+```
+
+**Note:** NVIDIA GPU encoding requires:
+- An NVIDIA GPU with NVENC support (most modern NVIDIA GPUs have it)
+- FFmpeg compiled with NVENC support (`--enable-nvenc`)
+- NVIDIA drivers installed
+
+To verify FFmpeg has NVENC support, run:
+```sh
+ffmpeg -encoders | grep nvenc
+```
+
+5. **Run the bot:** Launch the bot by running:
 
 ```sh
 python embedbot.py
@@ -95,6 +119,27 @@ When you share an Instagram link (posts, reels, IGTV) in a channel where the bot
 * Stories: `https://www.instagram.com/stories/...`
 
 **Note:** Videos larger than 8MB cannot be uploaded due to Discord's file size limits.
+
+### Hardware-Accelerated Video Encoding
+The bot supports NVIDIA GPU hardware acceleration for video encoding using NVENC. This feature can significantly improve video processing performance when enabled.
+
+**Benefits:**
+* Faster video processing
+* Lower CPU usage
+* Better performance when handling multiple video downloads simultaneously
+
+**Requirements:**
+* NVIDIA GPU with NVENC support (GeForce GTX 600 series or newer, most modern cards)
+* FFmpeg compiled with NVENC support
+* NVIDIA drivers installed on the system
+
+**How to Enable:**
+Set the `USE_NVIDIA_GPU` environment variable to `true`:
+```sh
+export USE_NVIDIA_GPU=true
+```
+
+**Note:** If hardware encoding fails (e.g., GPU not available or FFmpeg lacks NVENC support), the bot will fall back to CPU-based encoding. Check the bot logs for encoding status messages.
 
 ### User Emulation
 The bot can post Twitter/X links in two ways:
