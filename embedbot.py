@@ -1374,12 +1374,12 @@ async def on_message(message):
                 
                 except (discord.HTTPException, discord.Forbidden, OSError, IOError) as e:
                     logger.error(f"Error uploading TikTok video: {e}")
-                    await processing_msg.edit(content=f"❌ Error uploading TikTok video: {str(e)}")
+                    await processing_msg.edit(content="❌ Failed to upload TikTok video.")
                     # Clean up the file if it exists
                     cleanup_file(result['filepath'])
             else:
-                await processing_msg.edit(content=f"❌ Failed to download TikTok video: {result.get('error', 'Unknown error')}")
                 logger.error(f"TikTok download failed: {result.get('error', 'Unknown error')}")
+                await processing_msg.edit(content="❌ Failed to download TikTok video.")
     
     # Process Instagram links
     instagram_matches = list(INSTAGRAM_URL_REGEX.finditer(message.content))
@@ -1457,12 +1457,12 @@ async def on_message(message):
                 
                 except (discord.HTTPException, discord.Forbidden, OSError, IOError) as e:
                     logger.error(f"Error uploading Instagram video: {e}")
-                    await processing_msg.edit(content=f"❌ Error uploading Instagram video: {str(e)}")
+                    await processing_msg.edit(content="❌ Failed to upload Instagram video.")
                     # Clean up the file if it exists
                     cleanup_file(result['filepath'])
             else:
-                await processing_msg.edit(content=f"❌ Failed to download Instagram video: {result.get('error', 'Unknown error')}")
                 logger.error(f"Instagram download failed: {result.get('error', 'Unknown error')}")
+                await processing_msg.edit(content="❌ Failed to download Instagram video.")
 
 # Run the bot
 client.run(TOKEN)
