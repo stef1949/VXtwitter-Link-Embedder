@@ -42,7 +42,7 @@ def download_tiktok_video(video_url, output_folder=None):
         logger.info("NVIDIA GPU encoding enabled")
         ydl_opts['postprocessors'] = [{
             'key': 'FFmpegVideoConvertor',
-            'preferredformat': 'mp4',
+            'preferedformat': 'mp4',
         }]
         # FFmpeg arguments for NVIDIA NVENC hardware encoding
         ydl_opts['postprocessor_args'] = [
