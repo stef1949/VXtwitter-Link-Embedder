@@ -271,30 +271,37 @@ def compress_video_to_limit(filepath, max_size_bytes):
     compressed_path = os.path.join(output_dir, f"{base_name}_compressed.mp4")
 
     use_nvidia_gpu = os.getenv('USE_NVIDIA_GPU', 'false').lower() in ('true', '1', 'yes')
-    video_codec = "h264_nvenc" if use_nvidia_gpu else "libx264"
-    preset = "p4" if use_nvidia_gpu else "veryfast"
 
-    ffmpeg_args = [
-        "ffmpeg",
-        "-y",
-        "-i", filepath,
-        "-c:v", video_codec,
-        "-b:v", str(video_bitrate),
-        "-maxrate", str(video_bitrate),
-        "-bufsize", str(video_bitrate * 2),
-        "-preset", preset,
-        "-c:a", "aac",
-        "-b:a", str(audio_bitrate),
-        compressed_path,
-    ]
-
-    try:
-        result = subprocess.run(
+    def run_ffmpeg(video_codec, preset):
+        ffmpeg_args = [
+            "ffmpeg",
+            "-y",
+            "-i", filepath,
+            "-c:v", video_codec,
+            "-b:v", str(video_bitrate),
+            "-maxrate", str(video_bitrate),
+            "-bufsize", str(video_bitrate * 2),
+            "-preset", preset,
+            "-c:a", "aac",
+            "-b:a", str(audio_bitrate),
+            compressed_path,
+        ]
+        return subprocess.run(
             ffmpeg_args,
             capture_output=True,
             text=True,
             check=True,
         )
+
+    try:
+        if use_nvidia_gpu:
+            try:
+                run_ffmpeg("h264_nvenc", "p4")
+            except Exception as e:
+                logger.warning(f"NVENC compression failed, falling back to libx264: {e}")
+                run_ffmpeg("libx264", "veryfast")
+        else:
+            run_ffmpeg("libx264", "veryfast")
     except Exception as e:
         logger.error(f"FFmpeg compression failed for {filepath}: {e}")
         return None
