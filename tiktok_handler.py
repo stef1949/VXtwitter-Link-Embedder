@@ -6,6 +6,9 @@ import glob
 
 logger = logging.getLogger(__name__)
 
+# Check if NVIDIA GPU encoding should be enabled (via environment variable)
+USE_NVIDIA_GPU = os.getenv('USE_NVIDIA_GPU', 'false').lower() in ('true', '1', 'yes')
+
 def download_tiktok_video(video_url, output_folder=None):
     """
     Downloads a TikTok video from a given URL using yt-dlp.
@@ -33,6 +36,25 @@ def download_tiktok_video(video_url, output_folder=None):
         'quiet': True,      # Minimize terminal output
         'no_warnings': True,
     }
+    
+    # Add NVIDIA GPU hardware encoding if enabled
+    if USE_NVIDIA_GPU:
+        logger.info("NVIDIA GPU encoding enabled")
+        ydl_opts['postprocessors'] = [{
+            'key': 'FFmpegVideoConvertor',
+            'preferedformat': 'mp4',
+        }]
+        # FFmpeg arguments for NVIDIA NVENC hardware encoding
+        ydl_opts['postprocessor_args'] = [
+            '-c:v', 'h264_nvenc',           # Use NVIDIA H.264 hardware encoder
+            '-preset', 'p4',                 # Preset (p1-p7, p4 is balanced)
+            '-tune', 'hq',                   # High quality tuning
+            '-b:v', '5M',                    # Target bitrate
+            '-maxrate', '8M',                # Maximum bitrate
+            '-bufsize', '10M',               # Buffer size
+            '-c:a', 'copy',                  # Copy audio stream without re-encoding
+        ]
+        logger.info("Using NVIDIA NVENC hardware encoding with h264_nvenc")
 
     try:
         logger.info(f"Attempting to download TikTok video: {video_url}")
