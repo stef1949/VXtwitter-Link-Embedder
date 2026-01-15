@@ -8,7 +8,6 @@ import asyncio
 from discord.ext import commands
 from tiktok_handler import download_tiktok_video
 from instagram_handler import download_instagram_video
-from video_compressor import compress_video
 
 # Configure logging to show the time, logger name, level, and message.
 logging.basicConfig(
@@ -1341,61 +1340,47 @@ async def on_message(message):
                     file_size = os.path.getsize(filepath)
                     
                     # Discord's file size limit is 8MB for non-nitro, 50MB for nitro level 1, 100MB for nitro level 2
-                    # We'll use 10MB as the target for compression
-                    max_size = 10 * 1024 * 1024  # 10MB in bytes
+                    # We'll use 8MB as a safe limit
+                    max_size = 8 * 1024 * 1024  # 8MB in bytes
                     
-                    # If file is larger than 10MB, try to compress it
                     if file_size > max_size:
-                        logger.info(f"TikTok video too large: {file_size / (1024 * 1024):.2f} MB, attempting compression")
-                        compress_result = compress_video(filepath, target_size_mb=10)
+                        logger.warning(f"TikTok video too large: {file_size} bytes")
+                        # Clean up the file
+                        cleanup_file(filepath)
+                        # Delete the processing message silently
+                        await delete_message_silently(processing_msg)
+                    else:
+                        # Create a view with buttons for TikTok controls
+                        tiktok_view = TikTokControlView(original_url=validated_url, timeout=604800)  # 7 days timeout
+                        tiktok_view.original_author_id = message.author.id
                         
-                        if compress_result['success']:
-                            # Clean up original file if compression created a new file
-                            if compress_result['filepath'] != filepath:
-                                cleanup_file(filepath)
-                                filepath = compress_result['filepath']
-                            
-                            file_size = compress_result['compressed_size']
-                            logger.info(f"Compressed TikTok video from {compress_result['original_size'] / (1024 * 1024):.2f} MB to {file_size / (1024 * 1024):.2f} MB")
-                        else:
-                            logger.error(f"Failed to compress TikTok video: {compress_result.get('error', 'Unknown error')}")
-                            # Clean up the original file
-                            cleanup_file(filepath)
-                            # Delete the processing message silently
-                            await delete_message_silently(processing_msg)
-                            continue
-                    
-                    # Create a view with buttons for TikTok controls
-                    tiktok_view = TikTokControlView(original_url=validated_url, timeout=604800)  # 7 days timeout
-                    tiktok_view.original_author_id = message.author.id
-                    
-                    # Upload the video
-                    with open(filepath, 'rb') as f:
-                        file = discord.File(f, filename=os.path.basename(filepath))
-                        # Delete processing message and send new message with file
-                        await processing_msg.delete()
-                        sent_message = await message.channel.send(
-                            content=f"🎵 **TikTok video shared by <@{message.author.id}>:**\n{result['title']}",
-                            file=file,
-                            view=tiktok_view
-                        )
-                        tiktok_view.message = sent_message
-                        logger.info(f"Successfully uploaded TikTok video: {result['title']}")
-                    
-                    # Clean up the file
-                    cleanup_file(filepath)
-                    
-                    # Increment the links processed counter
-                    links_processed += 1
-                    
-                    # Try to delete the original message
-                    try:
-                        await message.delete()
-                        logger.info(f"Deleted original TikTok message {message.id} from {message.author}")
-                    except discord.Forbidden:
-                        logger.warning(f"Missing permissions to delete TikTok message {message.id} from {message.author}")
-                    except discord.HTTPException as e:
-                        logger.error(f"Failed to delete TikTok message {message.id}: {e}")
+                        # Upload the video
+                        with open(filepath, 'rb') as f:
+                            file = discord.File(f, filename=os.path.basename(filepath))
+                            # Delete processing message and send new message with file
+                            await processing_msg.delete()
+                            sent_message = await message.channel.send(
+                                content=f"🎵 **TikTok video shared by <@{message.author.id}>:**\n{result['title']}",
+                                file=file,
+                                view=tiktok_view
+                            )
+                            tiktok_view.message = sent_message
+                            logger.info(f"Successfully uploaded TikTok video: {result['title']}")
+                        
+                        # Clean up the file
+                        cleanup_file(filepath)
+                        
+                        # Increment the links processed counter
+                        links_processed += 1
+                        
+                        # Try to delete the original message
+                        try:
+                            await message.delete()
+                            logger.info(f"Deleted original TikTok message {message.id} from {message.author}")
+                        except discord.Forbidden:
+                            logger.warning(f"Missing permissions to delete TikTok message {message.id} from {message.author}")
+                        except discord.HTTPException as e:
+                            logger.error(f"Failed to delete TikTok message {message.id}: {e}")
                 
                 except (discord.HTTPException, discord.Forbidden, OSError, IOError) as e:
                     logger.error(f"Error uploading TikTok video: {e}")
@@ -1441,61 +1426,47 @@ async def on_message(message):
                     file_size = os.path.getsize(filepath)
                     
                     # Discord's file size limit is 8MB for non-nitro, 50MB for nitro level 1, 100MB for nitro level 2
-                    # We'll use 10MB as the target for compression
-                    max_size = 10 * 1024 * 1024  # 10MB in bytes
+                    # We'll use 8MB as a safe limit
+                    max_size = 8 * 1024 * 1024  # 8MB in bytes
                     
-                    # If file is larger than 10MB, try to compress it
                     if file_size > max_size:
-                        logger.info(f"Instagram video too large: {file_size / (1024 * 1024):.2f} MB, attempting compression")
-                        compress_result = compress_video(filepath, target_size_mb=10)
+                        logger.warning(f"Instagram video too large: {file_size} bytes")
+                        # Clean up the file
+                        cleanup_file(filepath)
+                        # Delete the processing message silently
+                        await delete_message_silently(processing_msg)
+                    else:
+                        # Create a view with buttons for Instagram controls
+                        instagram_view = InstagramControlView(original_url=validated_url, timeout=604800)  # 7 days timeout
+                        instagram_view.original_author_id = message.author.id
                         
-                        if compress_result['success']:
-                            # Clean up original file if compression created a new file
-                            if compress_result['filepath'] != filepath:
-                                cleanup_file(filepath)
-                                filepath = compress_result['filepath']
-                            
-                            file_size = compress_result['compressed_size']
-                            logger.info(f"Compressed Instagram video from {compress_result['original_size'] / (1024 * 1024):.2f} MB to {file_size / (1024 * 1024):.2f} MB")
-                        else:
-                            logger.error(f"Failed to compress Instagram video: {compress_result.get('error', 'Unknown error')}")
-                            # Clean up the original file
-                            cleanup_file(filepath)
-                            # Delete the processing message silently
-                            await delete_message_silently(processing_msg)
-                            continue
-                    
-                    # Create a view with buttons for Instagram controls
-                    instagram_view = InstagramControlView(original_url=validated_url, timeout=604800)  # 7 days timeout
-                    instagram_view.original_author_id = message.author.id
-                    
-                    # Upload the video
-                    with open(filepath, 'rb') as f:
-                        file = discord.File(f, filename=os.path.basename(filepath))
-                        # Delete processing message and send new message with file
-                        await processing_msg.delete()
-                        sent_message = await message.channel.send(
-                            content=f"📸 **Instagram video shared by <@{message.author.id}>:**\n{result['title']}",
-                            file=file,
-                            view=instagram_view
-                        )
-                        instagram_view.message = sent_message
-                        logger.info(f"Successfully uploaded Instagram video: {result['title']}")
-                    
-                    # Clean up the file
-                    cleanup_file(filepath)
-                    
-                    # Increment the links processed counter
-                    links_processed += 1
-                    
-                    # Try to delete the original message
-                    try:
-                        await message.delete()
-                        logger.info(f"Deleted original Instagram message {message.id} from {message.author}")
-                    except discord.Forbidden:
-                        logger.warning(f"Missing permissions to delete Instagram message {message.id} from {message.author}")
-                    except discord.HTTPException as e:
-                        logger.error(f"Failed to delete Instagram message {message.id}: {e}")
+                        # Upload the video
+                        with open(filepath, 'rb') as f:
+                            file = discord.File(f, filename=os.path.basename(filepath))
+                            # Delete processing message and send new message with file
+                            await processing_msg.delete()
+                            sent_message = await message.channel.send(
+                                content=f"📸 **Instagram video shared by <@{message.author.id}>:**\n{result['title']}",
+                                file=file,
+                                view=instagram_view
+                            )
+                            instagram_view.message = sent_message
+                            logger.info(f"Successfully uploaded Instagram video: {result['title']}")
+                        
+                        # Clean up the file
+                        cleanup_file(filepath)
+                        
+                        # Increment the links processed counter
+                        links_processed += 1
+                        
+                        # Try to delete the original message
+                        try:
+                            await message.delete()
+                            logger.info(f"Deleted original Instagram message {message.id} from {message.author}")
+                        except discord.Forbidden:
+                            logger.warning(f"Missing permissions to delete Instagram message {message.id} from {message.author}")
+                        except discord.HTTPException as e:
+                            logger.error(f"Failed to delete Instagram message {message.id}: {e}")
                 
                 except (discord.HTTPException, discord.Forbidden, OSError, IOError) as e:
                     logger.error(f"Error uploading Instagram video: {e}")
