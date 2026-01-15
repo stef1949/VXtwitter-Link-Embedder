@@ -223,6 +223,15 @@ def cleanup_file(filepath):
     except OSError as e:
         logger.warning(f"Failed to clean up file {filepath}: {e}")
 
+async def delete_message_silently(message):
+    """Delete a Discord message silently without raising errors"""
+    try:
+        await message.delete()
+    except (discord.NotFound, discord.Forbidden, discord.HTTPException) as e:
+        logger.debug(f"Could not delete message {message.id}: {e}")
+    except Exception as e:
+        logger.warning(f"Unexpected error deleting message {message.id}: {e}")
+
 # Security event logging
 def log_security_event(event_type, user_id, guild_id=None, details=None):
     """Log security-related events for auditing"""
@@ -1335,10 +1344,11 @@ async def on_message(message):
                     max_size = 8 * 1024 * 1024  # 8MB in bytes
                     
                     if file_size > max_size:
-                        await processing_msg.edit(content=f"❌ TikTok video is too large to upload ({file_size / 1024 / 1024:.2f}MB). Discord limit is 8MB.")
                         logger.warning(f"TikTok video too large: {file_size} bytes")
                         # Clean up the file
                         cleanup_file(filepath)
+                        # Delete the processing message silently
+                        await delete_message_silently(processing_msg)
                     else:
                         # Create a view with buttons for TikTok controls
                         tiktok_view = TikTokControlView(original_url=validated_url, timeout=604800)  # 7 days timeout
@@ -1374,12 +1384,14 @@ async def on_message(message):
                 
                 except (discord.HTTPException, discord.Forbidden, OSError, IOError) as e:
                     logger.error(f"Error uploading TikTok video: {e}")
-                    await processing_msg.edit(content=f"❌ Error uploading TikTok video: {str(e)}")
                     # Clean up the file if it exists
                     cleanup_file(result['filepath'])
+                    # Delete the processing message silently
+                    await delete_message_silently(processing_msg)
             else:
-                await processing_msg.edit(content=f"❌ Failed to download TikTok video: {result.get('error', 'Unknown error')}")
                 logger.error(f"TikTok download failed: {result.get('error', 'Unknown error')}")
+                # Delete the processing message silently
+                await delete_message_silently(processing_msg)
     
     # Process Instagram links
     instagram_matches = list(INSTAGRAM_URL_REGEX.finditer(message.content))
@@ -1418,10 +1430,11 @@ async def on_message(message):
                     max_size = 8 * 1024 * 1024  # 8MB in bytes
                     
                     if file_size > max_size:
-                        await processing_msg.edit(content=f"❌ Instagram video is too large to upload ({file_size / 1024 / 1024:.2f}MB). Discord limit is 8MB.")
                         logger.warning(f"Instagram video too large: {file_size} bytes")
                         # Clean up the file
                         cleanup_file(filepath)
+                        # Delete the processing message silently
+                        await delete_message_silently(processing_msg)
                     else:
                         # Create a view with buttons for Instagram controls
                         instagram_view = InstagramControlView(original_url=validated_url, timeout=604800)  # 7 days timeout
@@ -1457,12 +1470,14 @@ async def on_message(message):
                 
                 except (discord.HTTPException, discord.Forbidden, OSError, IOError) as e:
                     logger.error(f"Error uploading Instagram video: {e}")
-                    await processing_msg.edit(content=f"❌ Error uploading Instagram video: {str(e)}")
                     # Clean up the file if it exists
                     cleanup_file(result['filepath'])
+                    # Delete the processing message silently
+                    await delete_message_silently(processing_msg)
             else:
-                await processing_msg.edit(content=f"❌ Failed to download Instagram video: {result.get('error', 'Unknown error')}")
                 logger.error(f"Instagram download failed: {result.get('error', 'Unknown error')}")
+                # Delete the processing message silently
+                await delete_message_silently(processing_msg)
 
 # Run the bot
 client.run(TOKEN)
