@@ -41,18 +41,26 @@ This Discord bot looks for Twitter/X links in messages and automatically replace
 ## Prerequisites
 * Python 3.8+
 * Discord.py 2.0+
-* yt-dlp (for TikTok video downloads)
+* yt-dlp (for TikTok and Instagram video downloads)
+* ffmpeg (for video compression - must be installed on system)
 * A Discord bot token
 
 ## Setup
 1. **Clone the repository**
-2. **Install dependencies:** Run the following command to install required packages from requirements.txt:
+
+2. **Install system dependencies:** 
+   * **FFmpeg** (required for video compression)
+     - Ubuntu/Debian: `sudo apt-get install ffmpeg`
+     - macOS: `brew install ffmpeg`
+     - Windows: Download from [ffmpeg.org](https://ffmpeg.org/download.html)
+
+3. **Install Python dependencies:** Run the following command to install required packages from requirements.txt:
 
 ```sh
 pip install -r requirements.txt
 ```
 
-3. **Set up your environment variables:** Make sure to set your Discord bot token in your environment variables.
+4. **Set up your environment variables:** Make sure to set your Discord bot token in your environment variables.
 
 ```
 export DISCORD_TOKEN=your_token_here
@@ -70,21 +78,32 @@ DISCORD_TOKEN=your_token_here
 python embedbot.py
 ```
 
+## Video Compression
+
+The bot automatically compresses videos larger than 10MB to meet Discord's file size limits:
+* Videos are compressed using ffmpeg with H.264 codec
+* Target size is 10MB to ensure compatibility with most Discord users
+* If a video is already under 10MB, no compression is performed
+* Compression quality is automatically adjusted based on video duration and file size
+* If compression fails, the video will not be posted
+
 ## User Guide
 
 ### TikTok Video Downloads
 When you share a TikTok link in a channel where the bot is active:
 * The bot automatically downloads the video using yt-dlp
-* The video is uploaded directly to Discord (if under 8MB file size limit)
+* Videos larger than 10MB are automatically compressed to meet Discord's limits
+* The video is uploaded directly to Discord
 * The original message is deleted and replaced with the downloaded video
 * The bot attributes the video to you with a mention
 
-**Note:** Videos larger than 8MB cannot be uploaded due to Discord's file size limits.
+**Note:** If a video cannot be compressed to under 10MB, it will not be posted.
 
 ### Instagram Video Downloads
 When you share an Instagram link (posts, reels, IGTV) in a channel where the bot is active:
 * The bot automatically downloads the video using yt-dlp
-* The video is uploaded directly to Discord (if under 8MB file size limit)
+* Videos larger than 10MB are automatically compressed to meet Discord's limits
+* The video is uploaded directly to Discord
 * The original message is deleted and replaced with the downloaded video
 * The bot attributes the video to you with a mention
 
@@ -94,7 +113,7 @@ When you share an Instagram link (posts, reels, IGTV) in a channel where the bot
 * IGTV: `https://www.instagram.com/tv/...`
 * Stories: `https://www.instagram.com/stories/...`
 
-**Note:** Videos larger than 8MB cannot be uploaded due to Discord's file size limits.
+**Note:** If a video cannot be compressed to under 10MB, it will not be posted.
 
 ### User Emulation
 The bot can post Twitter/X links in two ways:
