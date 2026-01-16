@@ -271,6 +271,10 @@ def compress_video_to_limit(filepath, max_size_bytes):
     compressed_path = os.path.join(output_dir, f"{base_name}_compressed.mp4")
 
     use_nvidia_gpu = os.getenv('USE_NVIDIA_GPU', 'false').lower() in ('true', '1', 'yes')
+    if use_nvidia_gpu and os.name != "nt":
+        if not (os.path.exists("/dev/nvidia0") or os.path.exists("/dev/nvidiactl")):
+            logger.warning("NVIDIA device nodes not found; skipping NVENC and using libx264")
+            use_nvidia_gpu = False
 
     def run_ffmpeg(video_codec, preset, extra_args=None):
         if extra_args is None:
@@ -1177,7 +1181,12 @@ async def security_maintenance():
 async def on_ready():
     logger.info(f"Logged in as {client.user}!")
     cuda_visible = os.getenv("CUDA_VISIBLE_DEVICES")
+    nvidia_visible = os.getenv("NVIDIA_VISIBLE_DEVICES")
     logger.info(f"CUDA_VISIBLE_DEVICES={cuda_visible if cuda_visible is not None else 'unset'}")
+    logger.info(f"NVIDIA_VISIBLE_DEVICES={nvidia_visible if nvidia_visible is not None else 'unset'}")
+    if os.name != "nt":
+        nvidia_nodes = [p for p in ("/dev/nvidia0", "/dev/nvidiactl", "/dev/nvidia-uvm") if os.path.exists(p)]
+        logger.info(f"NVIDIA device nodes present: {', '.join(nvidia_nodes) if nvidia_nodes else 'none'}")
     try:
         result = subprocess.run(
             ["nvidia-smi", "-L"],
