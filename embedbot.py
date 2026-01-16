@@ -24,7 +24,7 @@ logger = logging.getLogger(__name__)
 # Retrieve the token from an environment variable
 TOKEN = os.getenv("DISCORD_BOT_TOKEN")
 if not TOKEN:
-    raise ValueError("No Discord token provided. Please set the DISCORD_TOKEN environment variable.")
+    raise ValueError("No Discord token provided. Please set the DISCORD_BOT_TOKEN environment variable.")
 
 # Enable the message content intent (required to read messages)
 intents = discord.Intents.default()
@@ -64,6 +64,13 @@ ADMIN_IDS = set()  # Set of bot admin user IDs
 
 # Server-specific settings
 server_settings = {}  # Maps server ID to settings dict
+
+# Timeouts for blocking operations (seconds)
+YTDLP_TIMEOUT_SECONDS = int(os.getenv("YTDLP_TIMEOUT_SECONDS", "120"))
+FFPROBE_TIMEOUT_SECONDS = int(os.getenv("FFPROBE_TIMEOUT_SECONDS", "15"))
+FFMPEG_TIMEOUT_SECONDS = int(os.getenv("FFMPEG_TIMEOUT_SECONDS", "120"))
+
+persistent_views_registered = False
 
 # Utility functions for security
 def check_global_rate_limit():
@@ -224,6 +231,11 @@ def cleanup_file(filepath):
     except OSError as e:
         logger.warning(f"Failed to clean up file {filepath}: {e}")
 
+async def run_blocking(func, *args, timeout_seconds=None):
+    if timeout_seconds:
+        return await asyncio.wait_for(asyncio.to_thread(func, *args), timeout=timeout_seconds)
+    return await asyncio.to_thread(func, *args)
+
 def get_video_duration_seconds(filepath):
     """Return video duration in seconds using ffprobe, or None on failure"""
     try:
@@ -238,6 +250,7 @@ def get_video_duration_seconds(filepath):
             capture_output=True,
             text=True,
             check=True,
+            timeout=FFPROBE_TIMEOUT_SECONDS,
         )
         duration_str = result.stdout.strip()
         if not duration_str:
@@ -246,6 +259,9 @@ def get_video_duration_seconds(filepath):
         if duration <= 0:
             return None
         return duration
+    except subprocess.TimeoutExpired as e:
+        logger.warning(f"ffprobe timed out for {filepath}: {e}")
+        return None
     except Exception as e:
         logger.warning(f"Failed to get video duration for {filepath}: {e}")
         return None
@@ -298,6 +314,7 @@ def compress_video_to_limit(filepath, max_size_bytes):
             capture_output=True,
             text=True,
             check=True,
+            timeout=FFMPEG_TIMEOUT_SECONDS,
         )
 
     try:
@@ -309,6 +326,9 @@ def compress_video_to_limit(filepath, max_size_bytes):
                 run_ffmpeg("libx264", "veryfast")
         else:
             run_ffmpeg("libx264", "veryfast")
+    except subprocess.TimeoutExpired as e:
+        logger.error(f"FFmpeg compression timed out for {filepath}: {e}")
+        return None
     except Exception as e:
         logger.error(f"FFmpeg compression failed for {filepath}: {e}")
         return None
@@ -1118,6 +1138,16 @@ class InstagramControlView(discord.ui.View):
     
 
 
+def register_persistent_views():
+    global persistent_views_registered
+    if persistent_views_registered:
+        return
+    client.add_view(MessageControlView(timeout=None))
+    client.add_view(TikTokControlView(original_url="https://example.com", timeout=None))
+    client.add_view(InstagramControlView(original_url="https://example.com", timeout=None))
+    persistent_views_registered = True
+    logger.info("Registered persistent views")
+
 # Error handling for Discord.py
 @tree.error
 async def on_command_error(interaction: discord.Interaction, error):
@@ -1180,6 +1210,7 @@ async def security_maintenance():
 @client.event
 async def on_ready():
     logger.info(f"Logged in as {client.user}!")
+    register_persistent_views()
     cuda_visible = os.getenv("CUDA_VISIBLE_DEVICES")
     nvidia_visible = os.getenv("NVIDIA_VISIBLE_DEVICES")
     logger.info(f"CUDA_VISIBLE_DEVICES={cuda_visible if cuda_visible is not None else 'unset'}")
@@ -1289,138 +1320,125 @@ async def on_message(message):
             else:
                 non_spoiler_urls.append(url)
         
+        now = time.time()
+        last_time = user_rate_limit.get(message.author.id, 0)
+        if now - last_time < RATE_LIMIT_SECONDS:
+            logger.info(f"User {message.author} is rate limited. Time since last processing: {now - last_time:.2f} seconds.")
+            return
+        user_rate_limit[message.author.id] = now
+
+        # Attempt to delete the original message once
+        try:
+            await message.delete()
+            logger.info(f"Deleted original message {message.id} from {message.author}")
+        except discord.Forbidden:
+            logger.warning(f"Missing permissions to delete message {message.id} from {message.author}")
+        except discord.HTTPException as e:
+            logger.error(f"Failed to delete message {message.id}: {e}")
+
         if spoiler_urls:
-            # Process spoilered URLs automatically with a spoiler embed
-            now = time.time()
-            last_time = user_rate_limit.get(message.author.id, 0)
-            if now - last_time < RATE_LIMIT_SECONDS:
-                logger.info(f"User {message.author} is rate limited. Time since last processing: {now - last_time:.2f} seconds.")
-                return
-            user_rate_limit[message.author.id] = now
-            
             logger.info(f"Processing spoilered message from {message.author} (ID: {message.id}) with URLs: {spoiler_urls}")
-            
+
             # Sanitize and convert URLs
             spoiler_urls = [sanitize_url(url) for url in spoiler_urls]
             modified_spoiler_urls = [re.sub(r'(twitter\.com|x\.com)', 'vxtwitter.com', url, flags=re.IGNORECASE) for url in spoiler_urls]
-            response = "\n".join(modified_spoiler_urls)
-            
-            
+            spoiler_response = "\n".join(modified_spoiler_urls)
+
             links_processed += len(spoiler_urls)
-            
-            # Attempt to delete the original message
-            try:
-                await message.delete()
-                logger.info(f"Deleted original message {message.id} from {message.author}")
-            except discord.Forbidden:
-                logger.warning(f"Missing permissions to delete message {message.id} from {message.author}")
-            except discord.HTTPException as e:
-                logger.error(f"Failed to delete message {message.id}: {e}")
-            
-            # Create a view with buttons for message control and store the original author ID
-            view = MessageControlView(timeout=604800)  # 7 days timeout
-            view.original_author_id = message.author.id
-            
-            # Send a spoiler embed using a placeholder message then edit to include the embed
+
+            spoiler_view = MessageControlView(timeout=604800)  # 7 days timeout
+            spoiler_view.original_author_id = message.author.id
+
             placeholder = "||spoiler||"
-            msg = await message.channel.send(placeholder)
             embed = discord.Embed(
                 title="Spoiler Embed",
                 description="This tweet is hidden behind a spoiler. Click to reveal.",
                 color=0x1DA1F2
             )
-            embed.add_field(name="Link", value=response, inline=False)
-            await msg.edit(content=placeholder, embed=embed)
-        
-        elif non_spoiler_urls:
-            # Process non-spoiler URLs as before
-            
-            now = time.time()
-            last_time = user_rate_limit.get(message.author.id, 0)
-            if now - last_time < RATE_LIMIT_SECONDS:
-                logger.info(f"User {message.author} is rate limited. Time since last processing: {now - last_time:.2f} seconds.")
-                return
-            user_rate_limit[message.author.id] = now
-            
+            embed.add_field(name="Link", value=spoiler_response, inline=False)
+            sent_spoiler_message = await message.channel.send(
+                content=placeholder,
+                embed=embed,
+                view=spoiler_view
+            )
+            spoiler_view.message = sent_spoiler_message
+
+        if non_spoiler_urls:
             logger.info(f"Processing message from {message.author} (ID: {message.id}) with URLs: {non_spoiler_urls}")
             non_spoiler_urls = [sanitize_url(url) for url in non_spoiler_urls]
             modified_urls = [re.sub(r'(twitter\.com|x\.com)', 'vxtwitter.com', url, flags=re.IGNORECASE) for url in non_spoiler_urls]
             response = "\n".join(modified_urls)
-            
-            
+
             links_processed += len(non_spoiler_urls)
-            
-            try:
-                await message.delete()
-                logger.info(f"Deleted original message {message.id} from {message.author}")
-            except discord.Forbidden:
-                logger.warning(f"Missing permissions to delete message {message.id} from {message.author}")
-            except discord.HTTPException as e:
-                logger.error(f"Failed to delete message {message.id}: {e}")
-            
+
             view = MessageControlView(timeout=604800)
             view.original_author_id = message.author.id
-        
-        # Check the user's emulation preference and send the message accordingly.
-        should_emulate = user_emulation_preferences.get(message.author.id, DEFAULT_EMULATION)
-        view.original_author_id = message.author.id
-        
-        if should_emulate:
-            webhook_permissions = False
-            if isinstance(message.channel, discord.TextChannel):
-                bot_permissions = message.channel.permissions_for(message.guild.me)
-                webhook_permissions = bot_permissions.manage_webhooks
-            
-            if webhook_permissions:
-                try:
-                    webhook = await message.channel.create_webhook(name="TempWebhook")
-                    logger.info(f"Created temporary webhook in channel {message.channel} for message {message.id}")
 
-                    sent_message = await webhook.send(
-                        content=response,
-                        username=message.author.display_name,
-                        avatar_url=message.author.display_avatar.url,
-                        view=view
-                    )
-                    view.message = sent_message
-                    logger.info(f"Sent modified message via webhook for message {message.id}")
-                    await webhook.delete()
-                    logger.info(f"Deleted temporary webhook for message {message.id}")
-                except discord.Forbidden as e:
-                    logger.error(f"Webhook permission error for message {message.id}: {e}")
+            # Check the user's emulation preference and send the message accordingly.
+            should_emulate = user_emulation_preferences.get(message.author.id, DEFAULT_EMULATION)
+
+            if should_emulate:
+                webhook_permissions = False
+                if isinstance(message.channel, discord.TextChannel):
+                    bot_permissions = message.channel.permissions_for(message.guild.me)
+                    webhook_permissions = bot_permissions.manage_webhooks
+
+                if webhook_permissions:
+                    webhook = None
+                    try:
+                        webhook = await message.channel.create_webhook(name="TempWebhook")
+                        logger.info(f"Created temporary webhook in channel {message.channel} for message {message.id}")
+
+                        sent_message = await webhook.send(
+                            content=response,
+                            username=message.author.display_name,
+                            avatar_url=message.author.display_avatar.url,
+                            view=view
+                        )
+                        view.message = sent_message
+                        logger.info(f"Sent modified message via webhook for message {message.id}")
+                    except discord.Forbidden as e:
+                        logger.error(f"Webhook permission error for message {message.id}: {e}")
+                        try:
+                            user_id_mention = f"<@{message.author.id}>"
+                            sent_message = await message.channel.send(f"**Link shared by {user_id_mention}:**\n{response}", view=view)
+                            view.message = sent_message
+                            logger.info(f"Sent modified message via bot fallback for message {message.id}")
+                        except Exception as e2:
+                            logger.error(f"Failed to send fallback message for message {message.id}: {e2}")
+                    except Exception as e:
+                        logger.error(f"Webhook error for message {message.id}: {e}")
+                        try:
+                            user_id_mention = f"<@{message.author.id}>"
+                            sent_message = await message.channel.send(f"**Link shared by {user_id_mention}:**\n{response}", view=view)
+                            view.message = sent_message
+                            logger.info(f"Sent modified message via bot fallback for message {message.id}")
+                        except Exception as e2:
+                            logger.error(f"Failed to send fallback message for message {message.id}: {e2}")
+                    finally:
+                        if webhook:
+                            try:
+                                await webhook.delete()
+                                logger.info(f"Deleted temporary webhook for message {message.id}")
+                            except Exception as e:
+                                logger.warning(f"Failed to delete temporary webhook for message {message.id}: {e}")
+                else:
+                    logger.warning(f"No webhook permissions in channel {message.channel.id}, using fallback method")
                     try:
                         user_id_mention = f"<@{message.author.id}>"
                         sent_message = await message.channel.send(f"**Link shared by {user_id_mention}:**\n{response}", view=view)
                         view.message = sent_message
-                        logger.info(f"Sent modified message via bot fallback for message {message.id}")
-                    except Exception as e2:
-                        logger.error(f"Failed to send fallback message for message {message.id}: {e2}")
-                except Exception as e:
-                    logger.error(f"Webhook error for message {message.id}: {e}")
-                    try:
-                        user_id_mention = f"<@{message.author.id}>"
-                        sent_message = await message.channel.send(f"**Link shared by {user_id_mention}:**\n{response}", view=view)
-                        view.message = sent_message
-                        logger.info(f"Sent modified message via bot fallback for message {message.id}")
-                    except Exception as e2:
-                        logger.error(f"Failed to send fallback message for message {message.id}: {e2}")
+                        logger.info(f"Sent modified message as bot due to missing webhook permissions for message {message.id}")
+                    except Exception as e:
+                        logger.error(f"Failed to send message as bot for message {message.id}: {e}")
             else:
-                logger.warning(f"No webhook permissions in channel {message.channel.id}, using fallback method")
                 try:
                     user_id_mention = f"<@{message.author.id}>"
                     sent_message = await message.channel.send(f"**Link shared by {user_id_mention}:**\n{response}", view=view)
                     view.message = sent_message
-                    logger.info(f"Sent modified message as bot due to missing webhook permissions for message {message.id}")
+                    logger.info(f"Sent modified message as bot (per user preference) for message {message.id}")
                 except Exception as e:
                     logger.error(f"Failed to send message as bot for message {message.id}: {e}")
-        else:
-            try:
-                user_id_mention = f"<@{message.author.id}>"
-                sent_message = await message.channel.send(f"**Link shared by {user_id_mention}:**\n{response}", view=view)
-                view.message = sent_message
-                logger.info(f"Sent modified message as bot (per user preference) for message {message.id}")
-            except Exception as e:
-                logger.error(f"Failed to send message as bot for message {message.id}: {e}")
     
     # Process TikTok links
     tiktok_matches = list(TIKTOK_URL_REGEX.finditer(message.content))
@@ -1446,7 +1464,16 @@ async def on_message(message):
             processing_msg = await message.channel.send(f"⏳ Downloading TikTok video from <@{message.author.id}>...")
             
             # Download the video
-            result = download_tiktok_video(validated_url)
+            try:
+                result = await run_blocking(
+                    download_tiktok_video,
+                    validated_url,
+                    timeout_seconds=YTDLP_TIMEOUT_SECONDS
+                )
+            except asyncio.TimeoutError:
+                logger.error(f"TikTok download timed out for URL: {validated_url}")
+                await delete_message_silently(processing_msg)
+                continue
             
             if result['success']:
                 try:
@@ -1461,7 +1488,16 @@ async def on_message(message):
                     
                     if file_size > max_size:
                         logger.warning(f"TikTok video too large ({file_size} bytes). Attempting compression.")
-                        compressed_path = compress_video_to_limit(filepath, max_size)
+                        compressed_path = None
+                        try:
+                            compressed_path = await run_blocking(
+                                compress_video_to_limit,
+                                filepath,
+                                max_size,
+                                timeout_seconds=FFMPEG_TIMEOUT_SECONDS
+                            )
+                        except asyncio.TimeoutError:
+                            logger.error(f"FFmpeg compression timed out for {filepath}")
                         if not compressed_path:
                             # Clean up the file
                             cleanup_file(filepath)
@@ -1548,7 +1584,16 @@ async def on_message(message):
             processing_msg = await message.channel.send(f"⏳ Downloading Instagram video from <@{message.author.id}>...")
             
             # Download the video
-            result = download_instagram_video(validated_url)
+            try:
+                result = await run_blocking(
+                    download_instagram_video,
+                    validated_url,
+                    timeout_seconds=YTDLP_TIMEOUT_SECONDS
+                )
+            except asyncio.TimeoutError:
+                logger.error(f"Instagram download timed out for URL: {validated_url}")
+                await delete_message_silently(processing_msg)
+                continue
             
             if result['success']:
                 try:
@@ -1563,7 +1608,16 @@ async def on_message(message):
                     
                     if file_size > max_size:
                         logger.warning(f"Instagram video too large ({file_size} bytes). Attempting compression.")
-                        compressed_path = compress_video_to_limit(filepath, max_size)
+                        compressed_path = None
+                        try:
+                            compressed_path = await run_blocking(
+                                compress_video_to_limit,
+                                filepath,
+                                max_size,
+                                timeout_seconds=FFMPEG_TIMEOUT_SECONDS
+                            )
+                        except asyncio.TimeoutError:
+                            logger.error(f"FFmpeg compression timed out for {filepath}")
                         if not compressed_path:
                             # Clean up the file
                             cleanup_file(filepath)
