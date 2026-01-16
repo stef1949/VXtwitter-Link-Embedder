@@ -1173,6 +1173,20 @@ async def security_maintenance():
 @client.event
 async def on_ready():
     logger.info(f"Logged in as {client.user}!")
+    cuda_visible = os.getenv("CUDA_VISIBLE_DEVICES")
+    logger.info(f"CUDA_VISIBLE_DEVICES={cuda_visible if cuda_visible is not None else 'unset'}")
+    try:
+        result = subprocess.run(
+            ["nvidia-smi", "-L"],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        logger.info(f"nvidia-smi -L output:\n{result.stdout.strip()}")
+        if result.stderr.strip():
+            logger.warning(f"nvidia-smi -L stderr:\n{result.stderr.strip()}")
+    except Exception as e:
+        logger.warning(f"nvidia-smi -L failed: {e}")
     
     # Initialize admins (bot owner or team members)
     try:
