@@ -272,12 +272,15 @@ def compress_video_to_limit(filepath, max_size_bytes):
 
     use_nvidia_gpu = os.getenv('USE_NVIDIA_GPU', 'false').lower() in ('true', '1', 'yes')
 
-    def run_ffmpeg(video_codec, preset):
+    def run_ffmpeg(video_codec, preset, extra_args=None):
+        if extra_args is None:
+            extra_args = []
         ffmpeg_args = [
             "ffmpeg",
             "-y",
             "-i", filepath,
             "-c:v", video_codec,
+            *extra_args,
             "-b:v", str(video_bitrate),
             "-maxrate", str(video_bitrate),
             "-bufsize", str(video_bitrate * 2),
@@ -296,7 +299,7 @@ def compress_video_to_limit(filepath, max_size_bytes):
     try:
         if use_nvidia_gpu:
             try:
-                run_ffmpeg("h264_nvenc", "p4")
+                run_ffmpeg("h264_nvenc", "p4", ["-gpu", "0"])
             except Exception as e:
                 logger.warning(f"NVENC compression failed, falling back to libx264: {e}")
                 run_ffmpeg("libx264", "veryfast")
